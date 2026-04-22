@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-electron
+release
+.vscode
+.idea
+*.log
+.env
+.env.local
+.DS_Store
+build/icon.ico.bak
+coverage

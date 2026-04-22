@@ -1,0 +1,408 @@
+import { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, clipboard, shell, dialog } from 'electron';
+import path from 'node:path';
+import fs from 'node:fs';
+import { getState, setState, patchState, resetState } from './store';
+import { getSecret, setSecret, deleteSecret, hasSecret, listSecretKeys } from './secrets';
+import { saveBufferAsAttachment, saveFromPath, readAttachmentBase64, deleteAttachment } from './attachments';
+import { complete, embed, vision, listModels, secretKeyForProvider } from './llm/index';
+import { autoFormatter } from './llm/autoFormat';
+import { ensureEmbeddings, semanticSearch, dropEmbeddings } from './llm/embeddings';
+
+const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+const IS_DEV = Boolean(process.env.VITE_DEV_SERVER_URL);
+
+let mainWindow: BrowserWindow | null = null;
+let quickWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
+function resolvePreload() {
+  return path.join(__dirname, 'preload.js');
+}
+
+function resolveIndex(entry: 'main' | 'quick') {
+  if (IS_DEV) {
+    return entry === 'quick' ? `${DEV_URL}/quick-capture.html` : DEV_URL;
+  }
+  const file = entry === 'quick' ? 'quick-capture.html' : 'index.html';
+  return `file://${path.join(__dirname, '..', 'dist', file)}`;
+}
+
+function trayIconPath(): string {
+  const candidates = [
+    path.join(process.resourcesPath || '', 'build', 'tray.png'),
+    path.join(__dirname, '..', 'build', 'tray.png'),
+    path.join(__dirname, '..', 'build', 'icon.ico')
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return '';
+}
+
+function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    minWidth: 720,
+    minHeight: 520,
+    backgroundColor: '#0c0e13',
+    title: 'Braindump',
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: resolvePreload(),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  mainWindow.loadURL(resolveIndex('main'));
+  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+  autoFormatter.attach(mainWindow);
+  autoFormatter.start();
+}
+
+function toggleMainWindow() {
+  if (!mainWindow) {
+    createMainWindow();
+    return;
+  }
+  if (mainWindow.isVisible() && mainWindow.isFocused()) {
+    mainWindow.hide();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+function openQuickCapture(targetTabId?: string) {
+  if (quickWindow) {
+    quickWindow.show();
+    quickWindow.focus();
+    quickWindow.webContents.send('quick-capture:target', { tabId: targetTabId || null });
+    return;
+  }
+  quickWindow = new BrowserWindow({
+    width: 520,
+    height: 220,
+    resizable: false,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    backgroundColor: '#0c0e13',
+    show: false,
+    webPreferences: {
+      preload: resolvePreload(),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  const url = `${resolveIndex('quick')}${targetTabId ? `?tab=${encodeURIComponent(targetTabId)}` : ''}`;
+  quickWindow.loadURL(url);
+  quickWindow.once('ready-to-show', () => {
+    quickWindow?.show();
+    quickWindow?.focus();
+    quickWindow?.webContents.send('quick-capture:target', { tabId: targetTabId || null });
+  });
+  quickWindow.on('blur', () => quickWindow?.hide());
+  quickWindow.on('closed', () => {
+    quickWindow = null;
+  });
+}
+
+function buildTrayMenu() {
+  const state = getState();
+  const afLabel = state.autoFormat.enabled ? 'AI: Auto-format ✓' : 'AI: Auto-format';
+  return Menu.buildFromTemplate([
+    { label: 'Open Braindump', click: () => toggleMainWindow() },
+    { label: 'Quick capture…', accelerator: 'CommandOrControl+Alt+N', click: () => openQuickCapture() },
+    { label: 'Ramble…', accelerator: 'CommandOrControl+Alt+R', click: () => {
+        toggleMainWindow();
+        mainWindow?.webContents.send('ui:open-ramble');
+      } },
+    { label: 'Brainstorm…', accelerator: 'CommandOrControl+Alt+Shift+B', click: () => {
+        toggleMainWindow();
+        mainWindow?.webContents.send('ui:open-brainstorm');
+      } },
+    { type: 'separator' },
+    {
+      label: afLabel,
+      type: 'checkbox',
+      checked: state.autoFormat.enabled,
+      click: () => {
+        const s = getState();
+        s.autoFormat.enabled = !s.autoFormat.enabled;
+        setState(s);
+        if (s.autoFormat.enabled) autoFormatter.start();
+        else autoFormatter.stop();
+        updateTray();
+        mainWindow?.webContents.send('state:changed', s);
+      }
+    },
+    {
+      label: 'Start on login',
+      type: 'checkbox',
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (item) => {
+        app.setLoginItemSettings({ openAtLogin: item.checked });
+      }
+    },
+    { label: 'Settings…', click: () => {
+        toggleMainWindow();
+        mainWindow?.webContents.send('ui:open-settings');
+      } },
+    { type: 'separator' },
+    { label: 'Quit Braindump', click: () => {
+        isQuitting = true;
+        app.quit();
+      } }
+  ]);
+}
+
+function updateTray() {
+  if (!tray) return;
+  tray.setContextMenu(buildTrayMenu());
+  const s = getState();
+  tray.setToolTip(`Braindump — auto-format ${s.autoFormat.enabled ? 'on' : 'off'}`);
+}
+
+function createTray() {
+  const p = trayIconPath();
+  const icon = p ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
+  tray = new Tray(icon.isEmpty() ? nativeImage.createFromDataURL(FALLBACK_TRAY_ICON) : icon);
+  tray.setToolTip('Braindump');
+  tray.on('click', () => toggleMainWindow());
+  updateTray();
+}
+
+function registerGlobalShortcuts() {
+  globalShortcut.register('CommandOrControl+Alt+B', () => toggleMainWindow());
+  globalShortcut.register('CommandOrControl+Alt+N', () => openQuickCapture());
+  globalShortcut.register('CommandOrControl+Alt+Shift+N', () => {
+    const s = getState();
+    openQuickCapture(s.activeTabId);
+  });
+  globalShortcut.register('CommandOrControl+Alt+R', () => {
+    toggleMainWindow();
+    mainWindow?.webContents.send('ui:open-ramble');
+  });
+  globalShortcut.register('CommandOrControl+Alt+Shift+B', () => {
+    toggleMainWindow();
+    mainWindow?.webContents.send('ui:open-brainstorm');
+  });
+}
+
+function broadcastState() {
+  mainWindow?.webContents.send('state:changed', getState());
+  quickWindow?.webContents.send('state:changed', getState());
+}
+
+function wireIpc() {
+  ipcMain.handle('store:get', () => getState());
+  ipcMain.handle('store:set', (_e, next) => {
+    setState(next);
+    broadcastState();
+    updateTray();
+  });
+  ipcMain.handle('store:patch', (_e, patch) => {
+    patchState(patch);
+    broadcastState();
+    updateTray();
+  });
+  ipcMain.handle('store:reset', () => {
+    resetState();
+    broadcastState();
+    updateTray();
+  });
+
+  ipcMain.handle('window:minimize-to-tray', () => {
+    mainWindow?.hide();
+  });
+  ipcMain.handle('window:hide-quick', () => {
+    quickWindow?.hide();
+  });
+
+  ipcMain.handle('secrets:set-key', (_e, { key, value }: { key: string; value: string }) => {
+    if (value) setSecret(key, value);
+    else deleteSecret(key);
+  });
+  ipcMain.handle('secrets:has-key', (_e, { key }: { key: string }) => hasSecret(key));
+  ipcMain.handle('secrets:list', () => listSecretKeys());
+
+  ipcMain.handle('llm:complete', async (_e, { providerId, messages, jsonMode, feature, temperature, maxTokens, streamId }: {
+    providerId: string;
+    messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+    jsonMode?: boolean;
+    feature: string;
+    temperature?: number;
+    maxTokens?: number;
+    streamId?: string;
+  }) => {
+    const state = getState();
+    const provider = state.providers.find((p) => p.id === providerId) || state.providers.find((p) => p.id === state.activeProviderId);
+    if (!provider) throw new Error('No active LLM provider configured');
+    const result = await complete(provider, {
+      messages,
+      feature,
+      jsonMode,
+      temperature,
+      maxTokens,
+      onToken: streamId ? (t) => mainWindow?.webContents.send(`llm:stream:${streamId}`, t) : undefined
+    });
+    const d = new Date().toISOString().slice(0, 10);
+    const s = getState();
+    s.usage.perDay[d] = s.usage.perDay[d] || { autoFormat: 0, ramble: 0, brainstorm: 0, other: 0, inputTokens: 0, outputTokens: 0 };
+    const bucket = (['autoFormat', 'ramble', 'brainstorm'] as const).includes(feature as never) ? feature : 'other';
+    (s.usage.perDay[d] as Record<string, number>)[bucket] += 1;
+    s.usage.perDay[d].inputTokens += result.inputTokens;
+    s.usage.perDay[d].outputTokens += result.outputTokens;
+    setState(s);
+    if (streamId) mainWindow?.webContents.send(`llm:stream-end:${streamId}`, result);
+    return result;
+  });
+
+  ipcMain.handle('llm:embed', async (_e, { providerId, texts }: { providerId?: string; texts: string[] }) => {
+    const state = getState();
+    const id = providerId || state.featureProviderOverrides.embeddings || state.activeProviderId;
+    const provider = state.providers.find((p) => p.id === id);
+    if (!provider) throw new Error('No provider configured for embeddings');
+    return embed(provider, { texts });
+  });
+
+  ipcMain.handle('llm:vision', async (_e, { providerId, imagePath, imageBase64, prompt }: { providerId?: string; imagePath: string; imageBase64?: string; prompt: string }) => {
+    const state = getState();
+    const id = providerId || state.activeProviderId;
+    const provider = state.providers.find((p) => p.id === id);
+    if (!provider) throw new Error('No provider configured for vision');
+    return vision(provider, { imagePath, imageBase64, prompt });
+  });
+
+  ipcMain.handle('llm:list-models', async (_e, { providerId }: { providerId: string }) => {
+    const state = getState();
+    const provider = state.providers.find((p) => p.id === providerId);
+    if (!provider) return [];
+    return listModels(provider);
+  });
+
+  ipcMain.handle('llm:test-connection', async (_e, { providerId }: { providerId: string }) => {
+    const state = getState();
+    const provider = state.providers.find((p) => p.id === providerId);
+    if (!provider) throw new Error('Unknown provider');
+    const t0 = Date.now();
+    const r = await complete(provider, {
+      messages: [
+        { role: 'system', content: 'Reply with the single word OK.' },
+        { role: 'user', content: 'ping' }
+      ],
+      feature: 'test',
+      maxTokens: 8
+    });
+    return { ok: true, latencyMs: Date.now() - t0, text: r.text, model: provider.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens };
+  });
+
+  ipcMain.handle('llm:provider-secret-keyname', (_e, { providerId }: { providerId: string }) => secretKeyForProvider(providerId as never));
+
+  ipcMain.handle('autoformat:toggle', (_e, enabled?: boolean) => {
+    const s = getState();
+    s.autoFormat.enabled = typeof enabled === 'boolean' ? enabled : !s.autoFormat.enabled;
+    setState(s);
+    if (s.autoFormat.enabled) autoFormatter.start();
+    else autoFormatter.stop();
+    updateTray();
+    return s.autoFormat.enabled;
+  });
+  ipcMain.handle('autoformat:status', () => autoFormatter.getStatus());
+  ipcMain.handle('autoformat:tick', () => autoFormatter.tick());
+
+  ipcMain.handle('attachments:save-clipboard', () => {
+    const img = clipboard.readImage();
+    if (img.isEmpty()) throw new Error('No image on clipboard');
+    return saveBufferAsAttachment(img.toPNG());
+  });
+  ipcMain.handle('attachments:save-base64', (_e, { dataUrl }: { dataUrl: string }) => {
+    const m = /^data:[^;]+;base64,(.*)$/.exec(dataUrl);
+    if (!m) throw new Error('Not a data URL');
+    return saveBufferAsAttachment(Buffer.from(m[1], 'base64'));
+  });
+  ipcMain.handle('attachments:save-path', (_e, { path: p }: { path: string }) => saveFromPath(p));
+  ipcMain.handle('attachments:read', (_e, { rel }: { rel: string }) => readAttachmentBase64(rel));
+  ipcMain.handle('attachments:delete', (_e, { rel }: { rel: string }) => deleteAttachment(rel));
+
+  ipcMain.handle('embeddings:ensure', async (_e, { items, providerId }: { items: { id: string; text: string; hash: string }[]; providerId?: string }) => {
+    const state = getState();
+    const id = providerId || state.featureProviderOverrides.embeddings || state.activeProviderId;
+    const provider = state.providers.find((p) => p.id === id);
+    if (!provider) throw new Error('No provider configured for embeddings');
+    await ensureEmbeddings(provider, items);
+  });
+  ipcMain.handle('embeddings:search', async (_e, { query, candidates, providerId }: { query: string; candidates: { id: string; hash: string }[]; providerId?: string }) => {
+    const state = getState();
+    const id = providerId || state.featureProviderOverrides.embeddings || state.activeProviderId;
+    const provider = state.providers.find((p) => p.id === id);
+    if (!provider) throw new Error('No provider configured for embeddings');
+    return semanticSearch(provider, query, candidates);
+  });
+  ipcMain.handle('embeddings:drop', (_e, { ids }: { ids: string[] }) => dropEmbeddings(ids));
+
+  ipcMain.handle('app:set-login-item', (_e, { open }: { open: boolean }) => {
+    app.setLoginItemSettings({ openAtLogin: open });
+  });
+  ipcMain.handle('app:get-login-item', () => app.getLoginItemSettings().openAtLogin);
+
+  ipcMain.handle('dialog:open-file', async () => {
+    const r = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }] });
+    return r.filePaths[0] || null;
+  });
+
+  ipcMain.handle('shell:open-external', (_e, url: string) => {
+    if (/^https?:\/\//.test(url)) shell.openExternal(url);
+  });
+
+  ipcMain.handle('capture:submit', (_e, { tabId, text }: { tabId: string | null; text: string }) => {
+    mainWindow?.webContents.send('capture:submit', { tabId, text });
+  });
+}
+
+app.whenReady().then(() => {
+  createMainWindow();
+  createTray();
+  registerGlobalShortcuts();
+  wireIpc();
+});
+
+app.on('window-all-closed', () => {
+  // keep running in tray on all platforms
+});
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
+const FALLBACK_TRAY_ICON =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAK0lEQVQ4jWNgGAVDATC+evXqPwMDAwMTAwMDw38GBgYGJgYGBgYGBgYGBgYAALtcB/5G7U2BAAAAAElFTkSuQmCC';
