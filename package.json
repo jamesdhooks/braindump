@@ -64,6 +64,13 @@
       "dist/**/*",
       "build/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "resources/openclaw-shim",
+        "to": "openclaw-shim",
+        "filter": ["**/*"]
+      }
+    ],
     "directories": {
       "buildResources": "build",
       "output": "release"

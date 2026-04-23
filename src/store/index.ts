@@ -38,6 +38,20 @@ type UIOnly = {
     fresh: { groupId: string; what_changed: string }[];
   } | null;
   dailyReportOpen: boolean;
+  clawPanelOpen: boolean;
+  clawFilterGroupId: string | null;
+  clawDraftFor: { tabId: string; groupId: string } | null;
+  clawBrokerState: {
+    status: 'disconnected' | 'connecting' | 'connected' | 'error';
+    clawVersion?: string;
+    backends: string[];
+    skills: string[];
+    transport: 'stdio' | 'none';
+    binary?: string;
+    lastError?: string;
+    sessions: string[];
+  };
+  clawSkillsEditorOpen: boolean;
   hoverTargetGroupId: string | null;
   lockedTargetGroupId: string | null;
   focusedGroupId: string | null;
@@ -117,6 +131,19 @@ export type StoreState = PersistedStore &
     setDailyReportOpen: (open: boolean) => void;
     restoreArchive: (groupId: string) => void;
 
+    setClawPanelOpen: (open: boolean) => void;
+    setClawFilterGroup: (groupId: string | null) => void;
+    setClawSkillsEditorOpen: (open: boolean) => void;
+    setClawDraftSession: (target: { tabId: string; groupId: string } | null) => void;
+    setClawBrokerState: (s: UIOnly['clawBrokerState']) => void;
+    setClawConfig: (patch: Partial<NonNullable<PersistedStore['claw']>>) => void;
+    upsertClawJob: (job: import('../types').ClawJob) => void;
+    appendClawEvent: (sessionId: string, event: import('../types').ClawJobEvent) => void;
+    appendClawArtifact: (sessionId: string, artifact: import('../types').ClawJobArtifact) => void;
+    updateClawJob: (sessionId: string, patch: Partial<import('../types').ClawJob>) => void;
+    pushClawPrompt: (sessionId: string, prompt: { promptId: string; question: string; options?: string[] }) => void;
+    resolveClawPrompt: (sessionId: string, promptId: string) => void;
+
     setProjectContext: (tabId: string, context: string, aliases?: string[]) => void;
     setCategory: (tabId: string, groupId: string, category: string | null) => void;
     moveGroup: (fromTabId: string, toTabId: string, groupId: string) => void;
@@ -138,6 +165,11 @@ function emptyUI(): UIOnly {
     pulseOpen: false,
     pulseData: null,
     dailyReportOpen: false,
+    clawPanelOpen: false,
+    clawFilterGroupId: null,
+    clawDraftFor: null,
+    clawBrokerState: { status: 'disconnected', backends: [], skills: [], transport: 'none', sessions: [] },
+    clawSkillsEditorOpen: false,
     hoverTargetGroupId: null,
     lockedTargetGroupId: null,
     focusedGroupId: null,
@@ -194,6 +226,14 @@ export const useStore = create<StoreState>()(
       { id: 'code-feature', label: 'Code feature', color: '#9effc7' },
       { id: 'household-todo', label: 'Household todo', color: '#ffd38a' }
     ],
+    claw: {
+      defaultBackend: 'claude-code',
+      autoSendCategories: [],
+      allowOutsideCwd: false,
+      allowGitPush: false,
+      allowRm: false
+    },
+    clawJobs: [],
     usage: { perDay: {} },
     hydrated: false,
 
@@ -224,6 +264,8 @@ export const useStore = create<StoreState>()(
           categories: s.categories,
           digests: s.digests,
           savedSearches: s.savedSearches,
+          claw: s.claw,
+          clawJobs: s.clawJobs,
           usage: s.usage
         };
         void window.braindump.setState(persisted);
@@ -793,6 +835,97 @@ export const useStore = create<StoreState>()(
     deleteSavedSearch(id) {
       set((s) => {
         s.savedSearches = (s.savedSearches ?? []).filter((x) => x.id !== id);
+      });
+      get().persist();
+    },
+
+    setClawPanelOpen(open) {
+      set((s) => {
+        s.clawPanelOpen = open;
+      });
+    },
+    setClawFilterGroup(groupId) {
+      set((s) => {
+        s.clawFilterGroupId = groupId;
+      });
+    },
+    setClawSkillsEditorOpen(open) {
+      set((s) => {
+        s.clawSkillsEditorOpen = open;
+      });
+    },
+    setClawDraftSession(target) {
+      set((s) => {
+        s.clawDraftFor = target;
+      });
+    },
+    setClawBrokerState(bs) {
+      set((s) => {
+        s.clawBrokerState = bs;
+      });
+    },
+    setClawConfig(patch) {
+      set((s) => {
+        s.claw = {
+          defaultBackend: 'claude-code',
+          autoSendCategories: [],
+          allowOutsideCwd: false,
+          allowGitPush: false,
+          allowRm: false,
+          ...(s.claw ?? {}),
+          ...patch
+        };
+      });
+      get().persist();
+    },
+    upsertClawJob(job) {
+      set((s) => {
+        s.clawJobs = s.clawJobs ?? [];
+        const i = s.clawJobs.findIndex((j) => j.sessionId === job.sessionId);
+        if (i >= 0) s.clawJobs[i] = job;
+        else s.clawJobs.unshift(job);
+      });
+      get().persist();
+    },
+    appendClawEvent(sessionId, event) {
+      set((s) => {
+        const job = (s.clawJobs ?? []).find((j) => j.sessionId === sessionId);
+        if (!job) return;
+        job.events.push(event);
+      });
+      get().persist();
+    },
+    appendClawArtifact(sessionId, artifact) {
+      set((s) => {
+        const job = (s.clawJobs ?? []).find((j) => j.sessionId === sessionId);
+        if (!job) return;
+        if (!job.artifacts.find((a) => a.id === artifact.id)) job.artifacts.push(artifact);
+      });
+      get().persist();
+    },
+    updateClawJob(sessionId, patch) {
+      set((s) => {
+        const job = (s.clawJobs ?? []).find((j) => j.sessionId === sessionId);
+        if (!job) return;
+        Object.assign(job, patch);
+      });
+      get().persist();
+    },
+    pushClawPrompt(sessionId, prompt) {
+      set((s) => {
+        const job = (s.clawJobs ?? []).find((j) => j.sessionId === sessionId);
+        if (!job) return;
+        if (!job.pendingPrompts.find((p) => p.promptId === prompt.promptId)) {
+          job.pendingPrompts.push(prompt);
+        }
+      });
+      get().persist();
+    },
+    resolveClawPrompt(sessionId, promptId) {
+      set((s) => {
+        const job = (s.clawJobs ?? []).find((j) => j.sessionId === sessionId);
+        if (!job) return;
+        job.pendingPrompts = job.pendingPrompts.filter((p) => p.promptId !== promptId);
       });
       get().persist();
     },

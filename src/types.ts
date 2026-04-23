@@ -76,6 +76,62 @@ export type DailyDigest = {
   stale: string[];
 };
 
+export type ClawConfig = {
+  binaryPath?: string;
+  defaultBackend: string;
+  autoSendCategories: string[];
+  allowOutsideCwd: boolean;
+  allowGitPush: boolean;
+  allowRm: boolean;
+};
+
+export type ClawDraft = {
+  goal: string;
+  constraints: string[];
+  acceptance_criteria: string[];
+  artifacts_to_produce: string[];
+  safety_notes: string[];
+};
+
+export type ClawJobArtifact = {
+  id: string;
+  kind: 'diff' | 'file' | 'link' | 'analytics' | 'text';
+  path?: string;
+  title?: string;
+  text?: string;
+  unifiedDiff?: string;
+  rows?: Record<string, unknown>[];
+  url?: string;
+  action?: 'created' | 'modified' | 'deleted';
+};
+
+export type ClawJobEvent =
+  | { at: number; kind: 'thinking'; text: string }
+  | { at: number; kind: 'log'; level: 'info' | 'warn' | 'error'; text: string }
+  | { at: number; kind: 'tool-call'; tool: string; args: Record<string, unknown>; id: string }
+  | { at: number; kind: 'tool-result'; id: string; ok: boolean; text?: string }
+  | { at: number; kind: 'status'; state: 'running' | 'waiting-input' | 'done' | 'error'; progress?: number }
+  | { at: number; kind: 'prompt'; promptId: string; question: string; options?: string[] }
+  | { at: number; kind: 'user-reply'; promptId: string; text: string }
+  | { at: number; kind: 'safety-block'; reason: string };
+
+export type ClawJob = {
+  sessionId: string;
+  tabId: string;
+  groupId: string;
+  startedAt: number;
+  endedAt?: number;
+  backend: string;
+  state: 'running' | 'waiting-input' | 'done' | 'error' | 'interrupted';
+  draft: ClawDraft;
+  skills: string[];
+  events: ClawJobEvent[];
+  artifacts: ClawJobArtifact[];
+  pendingPrompts: { promptId: string; question: string; options?: string[] }[];
+  summary?: string;
+  metrics?: { durationMs: number; tokensIn: number; tokensOut: number; files: number; diffs: number };
+};
+
 export type SavedSearch = {
   id: string;
   label: string;
@@ -176,6 +232,8 @@ export type PersistedStore = {
   categories: Category[];
   digests?: DailyDigest[];
   savedSearches?: SavedSearch[];
+  claw?: ClawConfig;
+  clawJobs?: ClawJob[];
   usage: {
     perDay: Record<string, UsageDay>;
     monthlyCapUsd?: number;

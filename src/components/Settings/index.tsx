@@ -7,14 +7,16 @@ import { PrivacySettings } from './PrivacySettings';
 import { GeneralSettings } from './GeneralSettings';
 import { ShortcutsSettings } from './ShortcutsSettings';
 import { ProjectSettings } from './ProjectSettings';
+import { ClawSettings } from './ClawSettings';
 
-type Tab = 'general' | 'project' | 'llm' | 'autoformat' | 'privacy' | 'shortcuts';
+type Tab = 'general' | 'project' | 'llm' | 'autoformat' | 'claw' | 'privacy' | 'shortcuts';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'project', label: 'Project' },
   { id: 'llm', label: 'LLM' },
   { id: 'autoformat', label: 'Auto-format' },
+  { id: 'claw', label: 'Claw' },
   { id: 'privacy', label: 'Privacy & cost' },
   { id: 'shortcuts', label: 'Shortcuts' }
 ];
@@ -56,6 +58,7 @@ export function SettingsDrawer() {
             {tab === 'project' && <ProjectSettings />}
             {tab === 'llm' && <LLMSettings />}
             {tab === 'autoformat' && <AutoFormatSettings />}
+            {tab === 'claw' && <ClawSettings />}
             {tab === 'privacy' && <PrivacySettings />}
             {tab === 'shortcuts' && <ShortcutsSettings />}
           </div>

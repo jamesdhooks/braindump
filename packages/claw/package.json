@@ -1,0 +1,7 @@
+{
+  "name": "@bd/claw",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./protocol.ts",
+  "types": "./protocol.ts"
+}

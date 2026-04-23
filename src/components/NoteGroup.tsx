@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Pin, Clock, Edit3, MoreHorizontal, MessageSquare, Sparkles, ListTodo, HelpCircle } from 'lucide-react';
+import { Check, Pin, Clock, Edit3, MoreHorizontal, MessageSquare, Sparkles, ListTodo, HelpCircle, Zap } from 'lucide-react';
 import clsx from 'clsx';
 import { useStore } from '../store';
 import type { NoteGroup as NoteGroupT, Tab } from '../types';
@@ -174,6 +174,15 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
           </button>
           <button className="w-full text-left px-3 py-1.5 hover:bg-ink-700 flex items-center gap-2" onClick={extractTasks}>
             <ListTodo size={13} /> Extract tasks
+          </button>
+          <button
+            className="w-full text-left px-3 py-1.5 hover:bg-ink-700 flex items-center gap-2"
+            onClick={() => {
+              useStore.getState().setClawDraftSession({ tabId, groupId: group.id });
+              setMenuOpen(false);
+            }}
+          >
+            <Zap size={13} /> Run with Claw
           </button>
           <button
             className="w-full text-left px-3 py-1.5 hover:bg-ink-700 flex items-center gap-2"

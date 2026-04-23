@@ -78,6 +78,14 @@ export const DEFAULT_STATE: PersistedStore = {
     { id: 'code-feature', label: 'Code feature', color: '#9effc7' },
     { id: 'household-todo', label: 'Household todo', color: '#ffd38a' }
   ],
+  claw: {
+    defaultBackend: 'claude-code',
+    autoSendCategories: [],
+    allowOutsideCwd: false,
+    allowGitPush: false,
+    allowRm: false
+  },
+  clawJobs: [],
   usage: {
     perDay: {}
   }

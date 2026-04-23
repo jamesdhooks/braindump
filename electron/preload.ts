@@ -12,6 +12,34 @@ type SkillResult<T> = {
   latencyMs: number;
 };
 
+type ClawBrokerState = {
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  clawVersion?: string;
+  backends: string[];
+  skills: string[];
+  transport: 'stdio' | 'none';
+  binary?: string;
+  lastError?: string;
+  sessions: string[];
+};
+
+type ClawInbound =
+  | { seq: number; type: 'welcome'; clawVersion: string; backends: string[]; skills: string[] }
+  | { seq: number; type: 'pong' }
+  | { seq: number; type: 'log'; sessionId: string; level: 'info' | 'warn' | 'error'; text: string }
+  | { seq: number; type: 'thinking'; sessionId: string; text: string }
+  | { seq: number; type: 'tool-call'; sessionId: string; tool: string; args: Record<string, unknown>; id: string }
+  | { seq: number; type: 'tool-result'; sessionId: string; id: string; ok: boolean; text?: string; artifacts?: unknown[] }
+  | { seq: number; type: 'prompt'; sessionId: string; promptId: string; question: string; options?: string[] }
+  | { seq: number; type: 'status'; sessionId: string; state: 'running' | 'waiting-input' | 'done' | 'error'; progress?: number }
+  | {
+      seq: number;
+      type: 'done';
+      sessionId: string;
+      summary: string;
+      metrics: { durationMs: number; tokensIn: number; tokensOut: number; files: number; diffs: number };
+    };
+
 type StreamHandle = {
   id: string;
   cancel: () => void;
@@ -187,6 +215,48 @@ const api = {
     dailyReport: (args: unknown) => ipcRenderer.invoke('skill:daily-report', args) as Promise<SkillResult<unknown>>,
     stalePulse: (args: unknown) => ipcRenderer.invoke('skill:stale-pulse', args) as Promise<SkillResult<unknown>>,
     template: (id: 'meeting' | 'decision' | 'postmortem') => ipcRenderer.invoke('skill:template', { id }) as Promise<SkillResult<{ lines: string[] }>>
+  },
+
+  claw: {
+    start: () => ipcRenderer.invoke('claw:start') as Promise<ClawBrokerState>,
+    stop: () => ipcRenderer.invoke('claw:stop') as Promise<ClawBrokerState>,
+    restart: () => ipcRenderer.invoke('claw:restart') as Promise<ClawBrokerState>,
+    state: () => ipcRenderer.invoke('claw:state') as Promise<ClawBrokerState>,
+    startSession: (args: { sessionId?: string; backend: string; cwd: string; skills: string[]; system?: string }) =>
+      ipcRenderer.invoke('claw:start-session', args) as Promise<{ sessionId: string }>,
+    message: (sessionId: string, content: string) => ipcRenderer.invoke('claw:message', { sessionId, content }),
+    reply: (sessionId: string, promptId: string, text: string) => ipcRenderer.invoke('claw:reply', { sessionId, promptId, text }),
+    interrupt: (sessionId: string) => ipcRenderer.invoke('claw:interrupt', { sessionId }),
+    endSession: (sessionId: string) => ipcRenderer.invoke('claw:end-session', { sessionId }),
+    interruptAll: () => ipcRenderer.invoke('claw:interrupt-all'),
+    isDangerous: (text: string) => ipcRenderer.invoke('claw:is-dangerous', { text }) as Promise<{ dangerous: boolean }>,
+    showLogs: () => ipcRenderer.invoke('claw:show-logs') as Promise<{ path: string }>,
+    draft: (args: { groupLines: string[]; tabName: string; projectContext?: string; appSkills: string[]; priorHistory?: string[] }) =>
+      ipcRenderer.invoke('skill:claw-draft', args) as Promise<SkillResult<{
+        goal: string;
+        constraints: string[];
+        acceptance_criteria: string[];
+        artifacts_to_produce: string[];
+        safety_notes: string[];
+      }>>,
+    onState: (cb: (state: ClawBrokerState) => void): (() => void) => {
+      const l = (_e: unknown, s: ClawBrokerState) => cb(s);
+      ipcRenderer.on('claw:state', l);
+      return () => ipcRenderer.removeListener('claw:state', l);
+    },
+    onMessage: (cb: (msg: ClawInbound) => void): (() => void) => {
+      const l = (_e: unknown, m: ClawInbound) => cb(m);
+      ipcRenderer.on('claw:message', l);
+      return () => ipcRenderer.removeListener('claw:message', l);
+    },
+    skills: {
+      list: () => ipcRenderer.invoke('claw-skills:list') as Promise<{ name: string; path: string; content: string; id: string; scope: string }[]>,
+      write: (args: { name: string; content: string }) =>
+        ipcRenderer.invoke('claw-skills:write', args) as Promise<{ name: string; path: string; content: string; id: string; scope: string }[]>,
+      remove: (name: string) =>
+        ipcRenderer.invoke('claw-skills:delete', { name }) as Promise<{ name: string; path: string; content: string; id: string; scope: string }[]>,
+      openFolder: () => ipcRenderer.invoke('claw-skills:open-folder') as Promise<string>
+    }
   },
 
   persistence: {

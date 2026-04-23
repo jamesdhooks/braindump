@@ -54,6 +54,20 @@ export function useGlobalHotkeys() {
         st.setDailyReportOpen(!st.dailyReportOpen);
         return;
       }
+      if (mod(e) && e.shiftKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        st.setClawPanelOpen(!st.clawPanelOpen);
+        return;
+      }
+      if (mod(e) && e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const gid = st.focusedGroupId || st.lockedTargetGroupId || st.hoverTargetGroupId;
+        if (gid) {
+          const tab = st.tabs.find((t) => t.groups.some((g) => g.id === gid));
+          if (tab) st.setClawDraftSession({ tabId: tab.id, groupId: gid });
+        }
+        return;
+      }
       if (mod(e) && !e.shiftKey && e.key.toLowerCase() === 'z') {
         if (!inEditable) {
           e.preventDefault();

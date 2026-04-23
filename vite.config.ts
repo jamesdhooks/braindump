@@ -7,7 +7,9 @@ import path from 'node:path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src')
+      '@': path.resolve(__dirname, 'src'),
+      '@bd/claw': path.resolve(__dirname, 'packages/claw/protocol.ts'),
+      '@bd/core': path.resolve(__dirname, 'packages/core/index.ts')
     }
   },
   plugins: [

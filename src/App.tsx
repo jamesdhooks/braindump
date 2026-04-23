@@ -2,6 +2,10 @@ import { useEffect } from 'react';
 import { useStore, applyThemeToDom } from './store';
 import { DailyReport } from './components/DailyReport';
 import { PulseDrawer } from './components/Pulse';
+import { ClawBridge } from './claw/ClawBridge';
+import { JobPanel } from './claw/JobPanel';
+import { SkillsEditor } from './claw/SkillsEditor';
+import { ClawDraftDialog } from './claw/ClawDraftDialog';
 import { runDailyReportIfDue, runStalePulse, scheduleNext } from './lib/scheduler';
 import { TabBar } from './components/TabBar';
 import { Composer } from './components/Composer';
@@ -70,6 +74,11 @@ export default function App() {
     const unsub = window.braindump.onOpenSettings(() => useStore.getState().setSettingsOpen(true));
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    void window.braindump.claw.start();
+  }, [hydrated]);
 
   useEffect(() => {
     if (!dailyDigestEnabled || !hydrated) return;
@@ -154,9 +163,20 @@ export default function App() {
       {historyForGroupId && <FormatHistory />}
       {dailyReportOpen && <DailyReport />}
       <PulseDrawer />
+      <ClawBridge />
+      <JobPanel />
+      <SkillsEditor />
+      <ClawDraftRenderer />
       <Toast />
     </div>
   );
+}
+
+function ClawDraftRenderer() {
+  const target = useStore((s) => s.clawDraftFor);
+  const clear = useStore((s) => s.setClawDraftSession);
+  if (!target) return null;
+  return <ClawDraftDialog tabId={target.tabId} groupId={target.groupId} onClose={() => clear(null)} />;
 }
 
 function EmptyState() {

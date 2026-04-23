@@ -17,9 +17,13 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@bd/claw": ["packages/claw/protocol.ts"],
+      "@bd/claw/*": ["packages/claw/*"],
+      "@bd/core": ["packages/core/index.ts"],
+      "@bd/core/*": ["packages/core/*"]
     },
     "types": ["node"]
   },
-  "include": ["src", "electron"]
+  "include": ["src", "electron", "packages"]
 }

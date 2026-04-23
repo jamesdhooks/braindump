@@ -17,6 +17,11 @@ import {
   runStalePulse,
   runTemplate
 } from './llm/skills';
+import { runClawDraft } from './llm/skills/clawDraft';
+import { clawBroker } from './claw/broker';
+import { ensureDefaultSkills, listSkills, writeSkill, deleteSkill, openSkillsFolder } from './claw/skills';
+import { isDangerous } from '../packages/claw/protocol';
+import crypto from 'node:crypto';
 import { autoFormatter } from './llm/autoFormat';
 import { ensureEmbeddings, semanticSearch, dropEmbeddings } from './llm/embeddings';
 import {
@@ -93,7 +98,10 @@ function createMainWindow() {
     }
   });
   mainWindow.loadURL(resolveIndex('main'));
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+    if (mainWindow) clawBroker.attachWindow(mainWindow);
+  });
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault();
@@ -491,10 +499,74 @@ function wireIpc() {
     }
     return { ok: false };
   });
+
+  ipcMain.handle('claw:start', () => {
+    clawBroker.start();
+    return clawBroker.getState();
+  });
+  ipcMain.handle('claw:stop', () => {
+    clawBroker.stop();
+    return clawBroker.getState();
+  });
+  ipcMain.handle('claw:restart', () => {
+    clawBroker.restart();
+    return clawBroker.getState();
+  });
+  ipcMain.handle('claw:state', () => clawBroker.getState());
+  ipcMain.handle(
+    'claw:start-session',
+    (_e, args: { sessionId?: string; backend: string; cwd: string; skills: string[]; system?: string }) => {
+      const id = args.sessionId ?? crypto.randomUUID();
+      clawBroker.startSession(id, args.backend, args.cwd, args.skills, args.system);
+      return { sessionId: id };
+    }
+  );
+  ipcMain.handle('claw:message', (_e, args: { sessionId: string; content: string }) => {
+    clawBroker.message(args.sessionId, args.content);
+  });
+  ipcMain.handle('claw:reply', (_e, args: { sessionId: string; promptId: string; text: string }) => {
+    clawBroker.reply(args.sessionId, args.promptId, args.text);
+  });
+  ipcMain.handle('claw:interrupt', (_e, args: { sessionId: string }) => {
+    clawBroker.send({ seq: Date.now(), type: 'interrupt', sessionId: args.sessionId });
+  });
+  ipcMain.handle('claw:end-session', (_e, args: { sessionId: string }) => {
+    clawBroker.endSession(args.sessionId);
+  });
+  ipcMain.handle('claw:interrupt-all', () => {
+    clawBroker.interruptAll();
+  });
+  ipcMain.handle('claw:is-dangerous', (_e, args: { text: string }) => ({ dangerous: isDangerous(args.text) }));
+  ipcMain.handle('skill:claw-draft', async (_e, args: {
+    groupLines: string[];
+    tabName: string;
+    projectContext?: string;
+    appSkills: string[];
+    priorHistory?: string[];
+  }) => runClawDraft(args));
+  ipcMain.handle('claw:show-logs', () => {
+    const logPath = path.join(app.getPath('userData'), 'claw.log');
+    void shell.openPath(logPath);
+    return { path: logPath };
+  });
+  ipcMain.handle('claw-skills:list', () => {
+    ensureDefaultSkills();
+    return listSkills();
+  });
+  ipcMain.handle('claw-skills:write', (_e, args: { name: string; content: string }) => {
+    writeSkill(args.name, args.content);
+    return listSkills();
+  });
+  ipcMain.handle('claw-skills:delete', (_e, args: { name: string }) => {
+    deleteSkill(args.name);
+    return listSkills();
+  });
+  ipcMain.handle('claw-skills:open-folder', () => openSkillsFolder());
 }
 
 app.whenReady().then(() => {
   const load = initStore();
+  ensureDefaultSkills();
   createMainWindow();
   createTray();
   registerGlobalShortcuts();

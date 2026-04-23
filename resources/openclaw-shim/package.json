@@ -1,0 +1,7 @@
+{
+  "name": "openclaw-shim",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "description": "Bundled fallback broker that speaks the Claw protocol. Wraps Claude Code CLI when available; falls back to a local echo backend."
+}

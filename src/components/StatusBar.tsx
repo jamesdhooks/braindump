@@ -1,6 +1,39 @@
 import clsx from 'clsx';
-import { Sparkles, Eye, EyeOff, Sun, Moon, Settings, MessageSquare, Wind, Minus, Sunrise, Activity } from 'lucide-react';
+import { Sparkles, Eye, EyeOff, Sun, Moon, Settings, MessageSquare, Wind, Minus, Sunrise, Activity, Zap } from 'lucide-react';
 import { useStore } from '../store';
+
+function ClawStatusDot() {
+  const bs = useStore((s) => s.clawBrokerState);
+  const jobs = useStore((s) => s.clawJobs ?? []);
+  const setPanel = useStore((s) => s.setClawPanelOpen);
+  const panelOpen = useStore((s) => s.clawPanelOpen);
+  const running = jobs.filter((j) => j.state === 'running' || j.state === 'waiting-input').length;
+  const color =
+    bs.status === 'connected'
+      ? running > 0
+        ? 'bg-warning'
+        : 'bg-success'
+      : bs.status === 'connecting'
+      ? 'bg-accent-400 animate-pulse'
+      : bs.status === 'error'
+      ? 'bg-danger'
+      : 'bg-[var(--fg-3)]';
+  return (
+    <button
+      onClick={() => setPanel(!panelOpen)}
+      onContextMenu={async (e) => {
+        e.preventDefault();
+        if (bs.status === 'disconnected' || bs.status === 'error') await window.braindump.claw.start();
+        else await window.braindump.claw.restart();
+      }}
+      className="inline-flex items-center gap-1 p-1.5 rounded hover:bg-surface-3 hover:text-fg-0"
+      title={`Claw: ${bs.status}${running ? ` · ${running} running` : ''}${bs.lastError ? ' · ' + bs.lastError : ''} (Ctrl+Shift+J; right-click to (re)connect)`}
+    >
+      <Zap size={12} />
+      <span className={'w-1.5 h-1.5 rounded-full ' + color} />
+    </button>
+  );
+}
 
 export function StatusBar() {
   const status = useStore((s) => s.autoFormatStatus);
@@ -71,6 +104,7 @@ export function StatusBar() {
         >
           <Activity size={12} />
         </button>
+        <ClawStatusDot />
         <button onClick={() => setFocus(!focus)} className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0" title="Focus mode (F11)">
           {focus ? <EyeOff size={12} /> : <Eye size={12} />}
         </button>
