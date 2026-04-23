@@ -44,6 +44,16 @@ export function useGlobalHotkeys() {
         st.setMotion(next);
         return;
       }
+      if (mod(e) && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        st.setPulseOpen(!st.pulseOpen);
+        return;
+      }
+      if (mod(e) && e.shiftKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        st.setDailyReportOpen(!st.dailyReportOpen);
+        return;
+      }
       if (mod(e) && !e.shiftKey && e.key.toLowerCase() === 'z') {
         if (!inEditable) {
           e.preventDefault();

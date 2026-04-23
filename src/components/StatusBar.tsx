@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Sparkles, Eye, EyeOff, Sun, Moon, Settings, MessageSquare, Wind, Minus } from 'lucide-react';
+import { Sparkles, Eye, EyeOff, Sun, Moon, Settings, MessageSquare, Wind, Minus, Sunrise, Activity } from 'lucide-react';
 import { useStore } from '../store';
 
 export function StatusBar() {
@@ -56,6 +56,20 @@ export function StatusBar() {
       <div className="flex items-center gap-1.5">
         <button onClick={() => setBrainstorm(!brainstormOpen)} className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0" title="Brainstorm (Ctrl+Shift+B)">
           <MessageSquare size={12} />
+        </button>
+        <button
+          onClick={() => useStore.getState().setDailyReportOpen(true)}
+          className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0"
+          title="Daily report (Ctrl+Shift+D)"
+        >
+          <Sunrise size={12} />
+        </button>
+        <button
+          onClick={() => useStore.getState().setPulseOpen(!useStore.getState().pulseOpen)}
+          className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0"
+          title="Pulse (Ctrl+Shift+P)"
+        >
+          <Activity size={12} />
         </button>
         <button onClick={() => setFocus(!focus)} className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0" title="Focus mode (F11)">
           {focus ? <EyeOff size={12} /> : <Eye size={12} />}

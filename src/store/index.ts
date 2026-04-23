@@ -30,6 +30,14 @@ export function applyThemeToDom(theme: 'dark' | 'light' | 'system') {
 }
 
 type UIOnly = {
+  highlightedLines: Record<string, number[]>;
+  pulseOpen: boolean;
+  pulseData: {
+    at: number;
+    nudges: { groupId: string; one_line_nudge: string }[];
+    fresh: { groupId: string; what_changed: string }[];
+  } | null;
+  dailyReportOpen: boolean;
   hoverTargetGroupId: string | null;
   lockedTargetGroupId: string | null;
   focusedGroupId: string | null;
@@ -100,6 +108,24 @@ export type StoreState = PersistedStore &
     setFeatureOverride: (feature: keyof PersistedStore['featureProviderOverrides'], provider?: LLMProviderId) => void;
     setAutoFormatConfig: (patch: Partial<PersistedStore['autoFormat']>) => void;
     setPrivacy: (patch: Partial<PersistedStore['ui']['privacy']>) => void;
+    setAutoSort: (on: boolean) => void;
+    setDailyReportHour: (h: number) => void;
+
+    setHighlightedLines: (groupId: string, indices: number[]) => void;
+    clearHighlightedLines: (groupId: string) => void;
+    setPulseOpen: (open: boolean) => void;
+    setDailyReportOpen: (open: boolean) => void;
+    restoreArchive: (groupId: string) => void;
+
+    setProjectContext: (tabId: string, context: string, aliases?: string[]) => void;
+    setCategory: (tabId: string, groupId: string, category: string | null) => void;
+    moveGroup: (fromTabId: string, toTabId: string, groupId: string) => void;
+    autoCategorizeGroup: (tabId: string, groupId: string) => Promise<void>;
+
+    appendDigest: (d: import('../types').DailyDigest) => void;
+
+    addSavedSearch: (s: import('../types').SavedSearch) => void;
+    deleteSavedSearch: (id: string) => void;
 
     upsertBrainstorm: (s: BrainstormSession) => void;
     appendBrainstormMessage: (id: string, msg: BrainstormMessage) => void;
@@ -108,6 +134,10 @@ export type StoreState = PersistedStore &
 
 function emptyUI(): UIOnly {
   return {
+    highlightedLines: {},
+    pulseOpen: false,
+    pulseData: null,
+    dailyReportOpen: false,
     hoverTargetGroupId: null,
     lockedTargetGroupId: null,
     focusedGroupId: null,
@@ -155,7 +185,9 @@ export const useStore = create<StoreState>()(
       motion: 'calm',
       privacy: { neverSendPinned: true, redactEmails: true, redactApiLikeStrings: true },
       dailyDigestEnabled: false,
-      semanticSearchEnabled: true
+      semanticSearchEnabled: true,
+      autoSort: false,
+      dailyReportHour: 8
     },
     categories: [
       { id: 'quick-thought', label: 'Quick thought', color: '#8ab4ff' },
@@ -190,6 +222,8 @@ export const useStore = create<StoreState>()(
           autoFormat: s.autoFormat,
           ui: s.ui,
           categories: s.categories,
+          digests: s.digests,
+          savedSearches: s.savedSearches,
           usage: s.usage
         };
         void window.braindump.setState(persisted);
@@ -283,6 +317,12 @@ export const useStore = create<StoreState>()(
         tab.groups.unshift(group);
       });
       get().persist();
+      // best-effort auto-categorize for freshly-committed groups
+      if (typeof window !== 'undefined' && window.braindump?.skill) {
+        setTimeout(() => {
+          void get().autoCategorizeGroup(tabId, id);
+        }, 300);
+      }
       return id;
     },
 
@@ -605,6 +645,154 @@ export const useStore = create<StoreState>()(
     setPrivacy(patch) {
       set((s) => {
         Object.assign(s.ui.privacy, patch);
+      });
+      get().persist();
+    },
+    setAutoSort(on) {
+      set((s) => {
+        s.ui.autoSort = on;
+      });
+      get().persist();
+    },
+    setHighlightedLines(groupId, indices) {
+      set((s) => {
+        s.highlightedLines[groupId] = indices;
+      });
+      setTimeout(() => {
+        useStore.setState((s) => {
+          if (s.highlightedLines[groupId]) delete s.highlightedLines[groupId];
+        });
+      }, 2200);
+    },
+    clearHighlightedLines(groupId) {
+      set((s) => {
+        if (s.highlightedLines[groupId]) delete s.highlightedLines[groupId];
+      });
+    },
+    setPulseOpen(open) {
+      set((s) => {
+        s.pulseOpen = open;
+      });
+    },
+    setDailyReportOpen(open) {
+      set((s) => {
+        s.dailyReportOpen = open;
+      });
+    },
+    restoreArchive(groupId) {
+      const st = get();
+      const idx = st.archive.findIndex((a) => a.group.id === groupId);
+      if (idx >= 0) st.restoreFromArchive(idx);
+    },
+    setDailyReportHour(h) {
+      set((s) => {
+        s.ui.dailyReportHour = Math.max(0, Math.min(23, Math.floor(h)));
+      });
+      get().persist();
+    },
+
+    setProjectContext(tabId, context, aliases) {
+      set((s) => {
+        const t = s.tabs.find((x) => x.id === tabId);
+        if (!t) return;
+        t.projectContext = context || undefined;
+        t.aliases = aliases ?? t.aliases;
+      });
+      get().persist();
+    },
+    setCategory(tabId, groupId, category) {
+      set((s) => {
+        const t = s.tabs.find((x) => x.id === tabId);
+        const g = t?.groups.find((x) => x.id === groupId);
+        if (!g) return;
+        g.category = category ?? undefined;
+        g.updatedAt = Date.now();
+      });
+      get().persist();
+    },
+    moveGroup(fromTabId, toTabId, groupId) {
+      if (fromTabId === toTabId) return;
+      set((s) => {
+        const src = s.tabs.find((x) => x.id === fromTabId);
+        const dst = s.tabs.find((x) => x.id === toTabId);
+        if (!src || !dst) return;
+        const idx = src.groups.findIndex((x) => x.id === groupId);
+        if (idx < 0) return;
+        const [g] = src.groups.splice(idx, 1);
+        g.suggestedTabId = undefined;
+        g.updatedAt = Date.now();
+        dst.groups.unshift(g);
+      });
+      get().persist();
+    },
+    async autoCategorizeGroup(tabId, groupId) {
+      const st = get();
+      const tab = st.tabs.find((t) => t.id === tabId);
+      const group = tab?.groups.find((g) => g.id === groupId);
+      if (!tab || !group || !group.lines.length) return;
+      if (group.pinned && st.ui.privacy.neverSendPinned) return;
+      if (!st.providers.find((p) => p.id === st.activeProviderId)) return;
+      try {
+        const res = await window.braindump.skill.categorize({
+          lines: group.lines,
+          categories: st.categories.map(({ id, label }) => ({ id, label })),
+          tabs: st.tabs.map((t) => ({ id: t.id, name: t.name, projectContext: t.projectContext, aliases: t.aliases })),
+          currentTabId: tabId
+        });
+        if (!res.ok || !res.value) return;
+        const { category, suggestedTabId, confidence } = res.value;
+        if (confidence < 0.6) return;
+        set((s) => {
+          const t = s.tabs.find((x) => x.id === tabId);
+          const g = t?.groups.find((x) => x.id === groupId);
+          if (!g) return;
+          if (s.categories.find((c) => c.id === category)) g.category = category;
+          g.suggestedTabId = suggestedTabId && suggestedTabId !== tabId ? suggestedTabId : undefined;
+        });
+        get().persist();
+        // auto-move when confidence is very high and user enabled it
+        if (
+          st.ui.autoSort &&
+          suggestedTabId &&
+          suggestedTabId !== tabId &&
+          confidence >= 0.85 &&
+          st.tabs.find((t) => t.id === suggestedTabId)
+        ) {
+          const toName = st.tabs.find((t) => t.id === suggestedTabId)?.name ?? 'another tab';
+          get().moveGroup(tabId, suggestedTabId, groupId);
+          get().showToast({
+            message: `Moved to ${toName}`,
+            kind: 'info',
+            actionLabel: 'Undo',
+            onAction: () => get().moveGroup(suggestedTabId, tabId, groupId)
+          });
+        }
+      } catch {
+        // silent; categorize is best-effort
+      }
+    },
+
+    appendDigest(d) {
+      set((s) => {
+        s.digests = s.digests ?? [];
+        const i = s.digests.findIndex((x) => x.date === d.date);
+        if (i >= 0) s.digests[i] = d;
+        else s.digests.unshift(d);
+        if (s.digests.length > 120) s.digests = s.digests.slice(0, 120);
+      });
+      get().persist();
+    },
+
+    addSavedSearch(s) {
+      set((st) => {
+        st.savedSearches = st.savedSearches ?? [];
+        st.savedSearches.unshift(s);
+      });
+      get().persist();
+    },
+    deleteSavedSearch(id) {
+      set((s) => {
+        s.savedSearches = (s.savedSearches ?? []).filter((x) => x.id !== id);
       });
       get().persist();
     },

@@ -22,6 +22,13 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
   const tabs = useStore((s) => s.tabs);
   const newTab = useStore((s) => s.newTab);
   const addGroupLines = useStore((s) => s.addGroupLines);
+  const categories = useStore((s) => s.categories);
+  const moveGroup = useStore((s) => s.moveGroup);
+  const setCategory = useStore((s) => s.setCategory);
+  const category = group.category ? categories.find((c) => c.id === group.category) : null;
+  const suggestedTab = group.suggestedTabId ? tabs.find((t) => t.id === group.suggestedTabId) : null;
+  const highlightIndices = useStore((s) => s.highlightedLines[group.id]);
+  const hlSet = new Set(highlightIndices ?? []);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(group.lines.join('\n'));
@@ -95,7 +102,13 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
         group.pinned && 'border-l-2 pinned-bob',
         recentlyFormatted && 'format-flash'
       )}
-      style={group.pinned ? { borderLeftColor: 'var(--accent-500)' } : undefined}
+      style={
+        group.pinned
+          ? { borderLeftColor: 'var(--accent-500)' }
+          : category
+          ? { boxShadow: `inset 3px 0 0 0 ${category.color}` }
+          : undefined
+      }
     >
       <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
@@ -207,7 +220,10 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
           {group.lines.map((line, i) => (
             <div
               key={i}
-              className="text-ink-100 break-words"
+              className={
+                'text-fg-0 break-words ' +
+                (hlSet.has(i) ? 'rounded bg-accent-500/15 px-1 -mx-1 transition-colors' : '')
+              }
               dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(line) }}
             />
           ))}
@@ -233,8 +249,58 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
         </div>
       )}
 
-      <div className="mt-1.5 flex items-center gap-3 text-[10.5px] text-ink-500">
+      {suggestedTab && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-md bg-surface-3 px-2.5 py-1.5 text-[11px] text-fg-1 fade-new">
+          <span>
+            Looks like <span className="text-fg-0">{suggestedTab.name}</span> — move?
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              className="px-2 py-0.5 rounded bg-accent-500 text-white hover:bg-accent-600"
+              onClick={(e) => {
+                e.stopPropagation();
+                moveGroup(tabId, suggestedTab.id, group.id);
+              }}
+            >
+              Move
+            </button>
+            <button
+              className="px-2 py-0.5 rounded text-fg-2 hover:text-fg-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                useStore.setState((s) => {
+                  const t = s.tabs.find((x) => x.id === tabId);
+                  const g = t?.groups.find((x) => x.id === group.id);
+                  if (g) g.suggestedTabId = undefined;
+                });
+                useStore.getState().persist();
+              }}
+            >
+              dismiss
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="mt-1.5 flex items-center gap-3 text-[10.5px] text-fg-3">
         <span>{new Date(group.updatedAt).toLocaleString()}</span>
+        {category && (
+          <button
+            className="flex items-center gap-1 hover:text-fg-0"
+            title="Click to change category"
+            onClick={(e) => {
+              e.stopPropagation();
+              const next = prompt(
+                `Category id (blank to clear). Available: ${categories.map((c) => c.id).join(', ')}`,
+                group.category ?? ''
+              );
+              if (next == null) return;
+              setCategory(tabId, group.id, next.trim() || null);
+            }}
+          >
+            <span className="w-2 h-2 rounded-sm" style={{ background: category.color }} />
+            {category.label}
+          </button>
+        )}
         {group.tags && group.tags.length > 0 && (
           <span className="flex gap-1">
             {group.tags.slice(0, 5).map((t) => (

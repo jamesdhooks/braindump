@@ -6,11 +6,13 @@ import { AutoFormatSettings } from './AutoFormatSettings';
 import { PrivacySettings } from './PrivacySettings';
 import { GeneralSettings } from './GeneralSettings';
 import { ShortcutsSettings } from './ShortcutsSettings';
+import { ProjectSettings } from './ProjectSettings';
 
-type Tab = 'general' | 'llm' | 'autoformat' | 'privacy' | 'shortcuts';
+type Tab = 'general' | 'project' | 'llm' | 'autoformat' | 'privacy' | 'shortcuts';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
+  { id: 'project', label: 'Project' },
   { id: 'llm', label: 'LLM' },
   { id: 'autoformat', label: 'Auto-format' },
   { id: 'privacy', label: 'Privacy & cost' },
@@ -51,6 +53,7 @@ export function SettingsDrawer() {
           </div>
           <div className="flex-1 overflow-y-auto p-6">
             {tab === 'general' && <GeneralSettings />}
+            {tab === 'project' && <ProjectSettings />}
             {tab === 'llm' && <LLMSettings />}
             {tab === 'autoformat' && <AutoFormatSettings />}
             {tab === 'privacy' && <PrivacySettings />}

@@ -68,6 +68,22 @@ export type Category = {
 
 export type MotionPreset = 'calm' | 'floaty' | 'reduced';
 
+export type DailyDigest = {
+  date: string;
+  headline: string;
+  byTab: { tabId: string; summary: string; highlights: string[] }[];
+  carryForward: string[];
+  stale: string[];
+};
+
+export type SavedSearch = {
+  id: string;
+  label: string;
+  query: string;
+  scope: ('all' | 'activeTab' | 'pinned' | 'archive' | 'brainstorms' | 'ocr')[];
+  createdAt: number;
+};
+
 export type ArchiveEntry = {
   group: NoteGroup;
   completedAt: number;
@@ -154,8 +170,12 @@ export type PersistedStore = {
     };
     dailyDigestEnabled: boolean;
     semanticSearchEnabled: boolean;
+    autoSort: boolean;
+    dailyReportHour: number;
   };
   categories: Category[];
+  digests?: DailyDigest[];
+  savedSearches?: SavedSearch[];
   usage: {
     perDay: Record<string, UsageDay>;
     monthlyCapUsd?: number;

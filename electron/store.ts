@@ -69,7 +69,9 @@ export const DEFAULT_STATE: PersistedStore = {
       redactApiLikeStrings: true
     },
     dailyDigestEnabled: false,
-    semanticSearchEnabled: true
+    semanticSearchEnabled: true,
+    autoSort: false,
+    dailyReportHour: 8
   },
   categories: [
     { id: 'quick-thought', label: 'Quick thought', color: '#8ab4ff' },

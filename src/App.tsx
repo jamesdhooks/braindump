@@ -1,5 +1,8 @@
 import { useEffect } from 'react';
 import { useStore, applyThemeToDom } from './store';
+import { DailyReport } from './components/DailyReport';
+import { PulseDrawer } from './components/Pulse';
+import { runDailyReportIfDue, runStalePulse, scheduleNext } from './lib/scheduler';
 import { TabBar } from './components/TabBar';
 import { Composer } from './components/Composer';
 import { NoteGroup } from './components/NoteGroup';
@@ -25,6 +28,11 @@ export default function App() {
   const settingsOpen = useStore((s) => s.settingsOpen);
   const searchOpen = useStore((s) => s.searchOpen);
   const historyForGroupId = useStore((s) => s.historyForGroupId);
+  const dailyReportOpen = useStore((s) => s.dailyReportOpen);
+  const setDailyReportOpen = useStore((s) => s.setDailyReportOpen);
+  const pulseOpen = useStore((s) => s.pulseOpen);
+  const dailyDigestEnabled = useStore((s) => s.ui.dailyDigestEnabled);
+  const dailyReportHour = useStore((s) => s.ui.dailyReportHour);
 
   useGlobalHotkeys();
   useAttachmentShortcuts();
@@ -62,6 +70,19 @@ export default function App() {
     const unsub = window.braindump.onOpenSettings(() => useStore.getState().setSettingsOpen(true));
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!dailyDigestEnabled || !hydrated) return;
+    void runDailyReportIfDue(false);
+    const t = window.setTimeout(() => void runStalePulse(false), 8000);
+    const unsched = scheduleNext(dailyReportHour ?? 8, () => void runDailyReportIfDue(false));
+    const pulseInterval = window.setInterval(() => void runStalePulse(false), 6 * 60 * 60 * 1000);
+    return () => {
+      window.clearTimeout(t);
+      window.clearInterval(pulseInterval);
+      unsched();
+    };
+  }, [dailyDigestEnabled, dailyReportHour, hydrated]);
   useEffect(() => {
     const unsub = window.braindump.onOpenRamble(() => useStore.getState().setRambleOpen(true));
     return () => unsub();
@@ -131,6 +152,8 @@ export default function App() {
       {settingsOpen && <SettingsDrawer />}
       {rambleOpen && <RambleDialog />}
       {historyForGroupId && <FormatHistory />}
+      {dailyReportOpen && <DailyReport />}
+      <PulseDrawer />
       <Toast />
     </div>
   );
