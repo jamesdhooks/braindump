@@ -12,15 +12,15 @@ body,
 html {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-feature-settings: 'cv11', 'ss01', 'ss02';
-  background: var(--surface-0);
+  background: transparent;
   color: var(--fg-0);
-  transition: background-color 240ms ease, color 240ms ease;
+  transition: color 240ms ease;
 }
 
 body {
   margin: 0;
   overflow: hidden;
-  background: var(--surface-0);
+  background: transparent;
   color: var(--fg-0);
 }
 

@@ -87,9 +87,11 @@ function createMainWindow() {
     height: 760,
     minWidth: 720,
     minHeight: 520,
-    backgroundColor: '#0c0e13',
+    backgroundColor: '#00000000',
     title: 'Braindump',
     show: false,
+    frame: false,
+    transparent: true,
     autoHideMenuBar: true,
     webPreferences: {
       preload: resolvePreload(),
@@ -116,6 +118,11 @@ function createMainWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+  const broadcastMaximize = () => {
+    mainWindow?.webContents.send('window:maximized-change', mainWindow.isMaximized());
+  };
+  mainWindow.on('maximize', broadcastMaximize);
+  mainWindow.on('unmaximize', broadcastMaximize);
   autoFormatter.attach(mainWindow);
   autoFormatter.start();
 }
@@ -277,6 +284,18 @@ function wireIpc() {
   ipcMain.handle('window:minimize-to-tray', () => {
     mainWindow?.hide();
   });
+  ipcMain.handle('window:minimize', () => {
+    mainWindow?.minimize();
+  });
+  ipcMain.handle('window:maximize-toggle', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  });
+  ipcMain.handle('window:close', () => {
+    if (!isQuitting) mainWindow?.hide();
+  });
+  ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
   ipcMain.handle('window:hide-quick', () => {
     quickWindow?.hide();
   });

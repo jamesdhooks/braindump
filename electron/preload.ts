@@ -59,6 +59,15 @@ const api = {
   },
 
   minimizeToTray: () => ipcRenderer.invoke('window:minimize-to-tray'),
+  minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  maximizeToggle: () => ipcRenderer.invoke('window:maximize-toggle'),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
+  isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized'),
+  onMaximizedChange: (cb: (maximized: boolean) => void): (() => void) => {
+    const l = (_e: unknown, v: boolean) => cb(v);
+    ipcRenderer.on('window:maximized-change', l);
+    return () => { ipcRenderer.removeListener('window:maximized-change', l); };
+  },
   hideQuickCapture: () => ipcRenderer.invoke('window:hide-quick'),
 
   onOpenSettings: (cb: () => void): (() => void) => {

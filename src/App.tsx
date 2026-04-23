@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore, applyThemeToDom } from './store';
 import { DailyReport } from './components/DailyReport';
 import { PulseDrawer } from './components/Pulse';
@@ -23,6 +23,7 @@ import { useGlobalHotkeys } from './hooks/useHotkeys';
 import { useAttachmentShortcuts } from './hooks/useAttachmentShortcuts';
 
 export default function App() {
+  const [isMaximized, setIsMaximized] = useState(false);
   const hydrated = useStore((s) => s.hydrated);
   const tabs = useStore((s) => s.tabs);
   const activeTabId = useStore((s) => s.activeTabId);
@@ -72,6 +73,12 @@ export default function App() {
 
   useEffect(() => {
     const unsub = window.braindump.onOpenSettings(() => useStore.getState().setSettingsOpen(true));
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    void window.braindump.isMaximized().then(setIsMaximized);
+    const unsub = window.braindump.onMaximizedChange(setIsMaximized);
     return () => unsub();
   }, []);
 
@@ -149,10 +156,8 @@ export default function App() {
   const regular = activeTab?.groups.filter((g) => !g.pinned) ?? [];
 
   return (
-    <div className="h-full w-full flex flex-col bg-surface-0 text-fg-0 select-none">
-      <div className="drag-region h-8 flex items-center px-4 text-[10.5px] uppercase tracking-[0.22em] text-fg-3">
-        <span className="no-drag">Braindump</span>
-      </div>
+    <div className={`h-full w-full flex flex-col bg-surface-0 text-fg-0 select-none overflow-hidden ${isMaximized ? '' : 'rounded-xl'}`}>
+      <TitleBar isMaximized={isMaximized} />
 
       {!focus && <TabBar />}
 
@@ -185,6 +190,52 @@ export default function App() {
       <SkillsEditor />
       <ClawDraftRenderer />
       <Toast />
+    </div>
+  );
+}
+
+function TitleBar({ isMaximized }: { isMaximized: boolean }) {
+  return (
+    <div className="drag-region h-9 flex items-center px-3 shrink-0">
+      <span className="no-drag text-[10.5px] uppercase tracking-[0.22em] text-fg-3 select-none pl-1">
+        Braindump
+      </span>
+      <div className="no-drag ml-auto flex items-center">
+        <button
+          onClick={() => window.braindump.minimizeWindow()}
+          className="w-8 h-8 flex items-center justify-center text-fg-3 hover:text-fg-1 hover:bg-surface-2 rounded-md transition-colors"
+          title="Minimize"
+        >
+          <svg width="11" height="2" viewBox="0 0 11 2" fill="none">
+            <rect y="0.5" width="11" height="1" rx="0.5" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          onClick={() => window.braindump.maximizeToggle()}
+          className="w-8 h-8 flex items-center justify-center text-fg-3 hover:text-fg-1 hover:bg-surface-2 rounded-md transition-colors"
+          title={isMaximized ? 'Restore' : 'Maximize'}
+        >
+          {isMaximized ? (
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <rect x="3" y="0.5" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1" />
+              <path d="M1 3.5H0.5V10.5H7.5V10" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <rect x="0.5" y="0.5" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          )}
+        </button>
+        <button
+          onClick={() => window.braindump.closeWindow()}
+          className="w-8 h-8 flex items-center justify-center text-fg-3 hover:text-white hover:bg-red-500 rounded-md transition-colors"
+          title="Close"
+        >
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+            <path d="M1 1L10 10M10 1L1 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
