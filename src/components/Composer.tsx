@@ -34,12 +34,12 @@ export function Composer() {
   return (
     <div
       className={clsx(
-        'px-6 pt-4 pb-3 border-b border-ink-800 bg-ink-900',
-        targetId && 'bg-gradient-to-b from-accent-500/5 to-transparent'
+        'px-8 pt-5 pb-4 border-b border-hairline bg-surface-0 transition-colors',
+        targetId && 'bg-[linear-gradient(180deg,var(--accent-glow),transparent)]'
       )}
     >
       {targetId && (
-        <div className="flex items-center gap-2 mb-1.5 text-[11px] text-accent-400">
+        <div className="flex items-center gap-2 mb-2 text-[11px] text-accent-400 fade-new">
           {lockedTargetGroupId ? <Lock size={11} /> : null}
           ↳ {lockedTargetGroupId ? 'locked to group' : 'hovering group'} — typing will append
         </div>
@@ -50,32 +50,32 @@ export function Composer() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Dump a thought… Enter for newline, Ctrl+Enter to commit, blank line for new group, /meeting /decision /postmortem for templates"
+          placeholder="Dump a thought. Enter for newline · Ctrl+Enter to commit · blank line for new group · /meeting /decision /postmortem"
           rows={text.split('\n').length > 3 ? Math.min(text.split('\n').length, 10) : 3}
-          className="composer w-full bg-ink-800/60 border border-ink-700 focus:border-accent-500 rounded-lg px-4 py-3 text-ink-100 placeholder:text-ink-500 outline-none"
+          className="composer w-full bg-surface-2 border border-hairline focus:border-accent-500 focus:shadow-[0_0_0_3px_var(--accent-glow)] rounded-md px-5 py-4 text-[15px] text-fg-0 placeholder:text-fg-3 outline-none transition-shadow"
         />
-        <div className="absolute right-2 bottom-2 flex items-center gap-1">
+        <div className="absolute right-3 bottom-3 flex items-center gap-1">
           <TemplatesMenu onInsert={(lines) => commit(lines.join('\n'), { tabId: activeTabId })} />
           <button
             onClick={() => setRambleOpen(true)}
             title="Ramble — LLM structured braindump (Ctrl+Shift+R)"
-            className="p-1.5 rounded hover:bg-ink-700 text-ink-300 hover:text-accent-400"
+            className="p-2 rounded hover:bg-surface-3 text-fg-1 hover:text-accent-400"
           >
-            <Sparkles size={15} />
+            <Sparkles size={16} />
           </button>
           <button
             onClick={() => doCommit(true)}
             title="Commit as pinned (Ctrl+Shift+Enter)"
-            className="p-1.5 rounded hover:bg-ink-700 text-ink-300"
+            className="p-2 rounded hover:bg-surface-3 text-fg-1"
           >
-            <Pin size={15} />
+            <Pin size={16} />
           </button>
           <button
             onClick={() => doCommit(false)}
             title="Commit (Ctrl+Enter)"
-            className="p-1.5 rounded hover:bg-ink-700 text-ink-300 hover:text-accent-400"
+            className="p-2 rounded bg-accent-500 hover:bg-accent-600 text-white shadow-card"
           >
-            <Send size={15} />
+            <Send size={16} />
           </button>
         </div>
       </div>

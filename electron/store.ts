@@ -1,5 +1,6 @@
-import Store from 'electron-store';
 import type { PersistedStore } from '../src/types';
+import { loadWithRecovery, writeStore, writeStartupSnapshot, type LoadResult } from './persistence';
+import { runMigrations, CURRENT_VERSION } from './migrations';
 
 const DEFAULT_AUTO_FORMAT = {
   enabled: false,
@@ -14,8 +15,8 @@ const DEFAULT_AUTO_FORMAT = {
   dailyRequestCap: 500
 };
 
-const DEFAULT_STATE: PersistedStore = {
-  version: 1,
+export const DEFAULT_STATE: PersistedStore = {
+  version: CURRENT_VERSION,
   tabs: [
     { id: 'inbox', name: 'Inbox', order: 0, groups: [] },
     { id: 'today', name: 'Today', order: 1, groups: [] },
@@ -61,6 +62,7 @@ const DEFAULT_STATE: PersistedStore = {
     focus: false,
     archiveOpen: false,
     brainstormOpen: false,
+    motion: 'calm',
     privacy: {
       neverSendPinned: true,
       redactEmails: true,
@@ -69,33 +71,53 @@ const DEFAULT_STATE: PersistedStore = {
     dailyDigestEnabled: false,
     semanticSearchEnabled: true
   },
+  categories: [
+    { id: 'quick-thought', label: 'Quick thought', color: '#8ab4ff' },
+    { id: 'code-feature', label: 'Code feature', color: '#9effc7' },
+    { id: 'household-todo', label: 'Household todo', color: '#ffd38a' }
+  ],
   usage: {
     perDay: {}
   }
 };
 
-const store = new Store<PersistedStore>({
-  name: 'braindump',
-  defaults: DEFAULT_STATE,
-  clearInvalidConfig: false,
-  migrations: {}
-});
+let cached: PersistedStore | null = null;
+let loadInfo: LoadResult | null = null;
+
+export function initStore(): LoadResult {
+  const res = loadWithRecovery();
+  if (res.store) {
+    cached = runMigrations(res.store as unknown as Record<string, unknown>);
+  } else {
+    cached = DEFAULT_STATE;
+  }
+  writeStartupSnapshot(cached);
+  loadInfo = res;
+  return res;
+}
+
+export function getLoadInfo(): LoadResult | null {
+  return loadInfo;
+}
 
 export function getState(): PersistedStore {
-  return store.store;
+  if (!cached) {
+    initStore();
+  }
+  return cached!;
 }
 
 export function setState(next: PersistedStore) {
-  store.store = next;
+  cached = next;
+  void writeStore(next);
 }
 
 export function patchState(patch: Partial<PersistedStore>) {
-  store.store = { ...store.store, ...patch };
+  cached = { ...getState(), ...patch };
+  void writeStore(cached);
 }
 
 export function resetState() {
-  store.clear();
-  store.store = DEFAULT_STATE;
+  cached = DEFAULT_STATE;
+  void writeStore(cached);
 }
-
-export { DEFAULT_STATE };

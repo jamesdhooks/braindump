@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Mic, MicOff, Sparkles, Loader2, Check } from 'lucide-react';
 import { useStore } from '../store';
-import { llmJson, llmStream } from '../lib/llmClient';
-import { activeProviderIdForFeature } from './Settings/util';
 import { nanoid } from 'nanoid';
 
 type SpeechRecognitionLike = {
@@ -24,8 +22,6 @@ function getSpeechRecognition(): SpeechRecognitionLike | null {
 
 export function RambleDialog() {
   const close = useStore((s) => s.setRambleOpen);
-  const active = useStore((s) => s.activeProviderId);
-  const overrides = useStore((s) => s.featureProviderOverrides);
   const tabs = useStore((s) => s.tabs);
   const activeTabId = useStore((s) => s.activeTabId);
 
@@ -74,43 +70,13 @@ export function RambleDialog() {
     setLoading(true);
     setStreamLines([]);
     setDone(false);
-    const providerId = activeProviderIdForFeature('ramble', overrides, active);
-    const system =
-      'Turn the following stream-of-consciousness into a stepped brain dump. Each line is ONE atomic thought, short and declarative. No prose. No headings. Preserve every concrete detail. Reflect any implicit ordering. Output ONLY JSON: { "lines": string[] }.';
+    const tabs = useStore.getState().tabs;
+    const projectContext = tabs.find((t) => t.id === targetTabId)?.projectContext;
     try {
-      let buffered = '';
-      await new Promise<void>((resolve) => {
-        llmStream({
-          providerId,
-          feature: 'ramble',
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: text }
-          ],
-          onToken: (t) => {
-            buffered += t;
-            const match = /\[([^\]]*?)\]/.exec(buffered);
-            if (match) {
-              try {
-                const arr = JSON.parse('[' + match[1] + ']') as string[];
-                if (Array.isArray(arr)) setStreamLines(arr);
-              } catch {
-                // ignore
-              }
-            }
-          },
-          onDone: () => resolve()
-        });
-      });
-      const parsed = await llmJson<{ lines: string[] }>({
-        providerId,
-        feature: 'ramble',
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: text }
-        ]
-      });
-      const lines = parsed?.lines?.length ? parsed.lines : streamLines.length ? streamLines : text.split('\n').filter(Boolean);
+      const res = await window.braindump.skill.ramble({ monologue: text, projectContext });
+      const lines = res.ok && res.value?.lines?.length
+        ? res.value.lines
+        : text.split('\n').map((l) => l.trim()).filter(Boolean);
       if (lines.length) {
         const st = useStore.getState();
         const groupId = st.addGroupLines(targetTabId, lines, false, 'ramble');

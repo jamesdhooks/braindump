@@ -38,6 +38,12 @@ export function useGlobalHotkeys() {
         st.setAutoFormatConfig({ enabled: !st.autoFormat.enabled });
         return;
       }
+      if (mod(e) && e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        const next = st.ui.motion === 'calm' ? 'floaty' : st.ui.motion === 'floaty' ? 'reduced' : 'calm';
+        st.setMotion(next);
+        return;
+      }
       if (mod(e) && !e.shiftKey && e.key.toLowerCase() === 'z') {
         if (!inEditable) {
           e.preventDefault();

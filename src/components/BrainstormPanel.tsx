@@ -95,21 +95,13 @@ export function BrainstormPanel() {
     setCapturing(true);
     try {
       const transcript = current.messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
-      const providerId = activeProviderIdForFeature('brainstorm', overrides, active);
-      const res = await llmJson<{ lines: string[]; suggested_tab?: string | null; suggested_title?: string | null }>({
-        providerId,
-        feature: 'brainstorm',
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Finalize a brainstorm into a stepped brain dump. Each line: ONE atomic thought, short, declarative. No prose, headings, bullets, or numbering. Output ONLY JSON: { "lines": string[], "suggested_tab": string | null, "suggested_title": string | null }.'
-          },
-          { role: 'user', content: `Full brainstorm transcript:\n"""\n${transcript}\n"""` }
-        ]
+      const activeTab = useStore.getState().tabs.find((t) => t.id === activeTabId);
+      const res = await window.braindump.skill.capture({
+        transcript,
+        projectContext: activeTab?.projectContext
       });
-      if (res?.lines?.length) {
-        setCapturePreview({ lines: res.lines, suggested_tab: res.suggested_tab });
+      if (res.ok && res.value?.lines?.length) {
+        setCapturePreview({ lines: res.value.lines, suggested_tab: res.value.suggested_tab ?? null });
       }
     } finally {
       setCapturing(false);

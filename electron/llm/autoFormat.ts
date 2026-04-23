@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import { BrowserWindow } from 'electron';
-import { complete } from './index';
-import { FORMAT_SYSTEM, FORMAT_USER } from './prompts';
+import { runFormat } from './skills/format';
 import type { LLMProviderConfig, NoteGroup, AutoFormatConfig, PersistedStore, AutoFormatStatus } from '../../src/types';
 import { getState, setState } from '../store';
 
@@ -140,39 +139,22 @@ export class AutoFormatter {
     if (!tab || !group) return;
     const cfg = state.autoFormat;
 
-    const systemMsg = FORMAT_SYSTEM({
+    const result = await runFormat({
+      lines: group.lines,
       aggressiveness: cfg.aggressiveness,
-      preserveVoice: cfg.preserveVoice
-    });
-    const userMsg = FORMAT_USER(group.lines);
-
-    const result = await complete(provider, {
-      messages: [
-        { role: 'system', content: systemMsg },
-        { role: 'user', content: userMsg }
-      ],
-      feature: 'autoFormat',
-      jsonMode: true,
-      temperature: provider.temperature
+      preserveVoice: cfg.preserveVoice,
+      projectContext: tab.projectContext
     });
 
-    let parsed: { revised_lines?: string[]; confidence?: number; notes?: string } | null = null;
-    try {
-      parsed = JSON.parse(result.text);
-    } catch {
-      // ignore
+    if (!result.ok || !result.value) {
+      this.status = { ...this.status, lastAction: `skipped (${result.error ?? 'no data'})` };
+      this.broadcast();
+      return;
     }
-    if (!parsed || !Array.isArray(parsed.revised_lines)) return;
-    if (typeof parsed.confidence === 'number' && parsed.confidence < cfg.requireConfidenceAbove) {
+    const parsed = result.value;
+    if (parsed.confidence < cfg.requireConfidenceAbove) {
       this.status = { ...this.status, lastAction: `low-confidence skip (${parsed.confidence.toFixed(2)})` };
       this.broadcast();
-      this.recordUsage((s) => {
-        const d = today();
-        s.usage.perDay[d] = s.usage.perDay[d] || { autoFormat: 0, ramble: 0, brainstorm: 0, other: 0, inputTokens: 0, outputTokens: 0 };
-        s.usage.perDay[d].autoFormat += 1;
-        s.usage.perDay[d].inputTokens += result.inputTokens;
-        s.usage.perDay[d].outputTokens += result.outputTokens;
-      });
       return;
     }
 
@@ -189,17 +171,12 @@ export class AutoFormatter {
         model: `${provider.id}/${provider.model}`,
         diffSummary: parsed?.notes
       });
-      const revised = parsed!.revised_lines!;
+      const revised = parsed.revised_lines;
       g.lines = revised;
       const hs = new Set(g.formattedHashes || []);
       for (const l of revised) hs.add(hashLine(l));
       g.formattedHashes = [...hs];
       g.updatedAt = Date.now();
-      const d = today();
-      s.usage.perDay[d] = s.usage.perDay[d] || { autoFormat: 0, ramble: 0, brainstorm: 0, other: 0, inputTokens: 0, outputTokens: 0 };
-      s.usage.perDay[d].autoFormat += 1;
-      s.usage.perDay[d].inputTokens += result.inputTokens;
-      s.usage.perDay[d].outputTokens += result.outputTokens;
     });
 
     this.status = { ...this.status, lastAction: `formatted group ${groupId.slice(0, 6)}` };

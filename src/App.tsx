@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useStore } from './store';
+import { useStore, applyThemeToDom } from './store';
 import { TabBar } from './components/TabBar';
 import { Composer } from './components/Composer';
 import { NoteGroup } from './components/NoteGroup';
@@ -37,13 +37,26 @@ export default function App() {
       cleanup = window.braindump.onStateChanged((s) => {
         useStore.getState().hydrate(s);
       });
-      if (state.ui.theme === 'dark') document.documentElement.classList.add('dark');
-      if (state.ui.theme === 'light') document.documentElement.classList.remove('dark');
+      applyThemeToDom(state.ui.theme);
+      document.documentElement.setAttribute('data-motion', state.ui.motion ?? 'calm');
     })();
     return () => {
       cleanup?.();
     };
   }, []);
+
+  const theme = useStore((s) => s.ui.theme);
+  const motion = useStore((s) => s.ui.motion);
+  useEffect(() => {
+    document.documentElement.setAttribute('data-motion', motion);
+  }, [motion]);
+  useEffect(() => {
+    if (theme !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => applyThemeToDom('system');
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [theme]);
 
   useEffect(() => {
     const unsub = window.braindump.onOpenSettings(() => useStore.getState().setSettingsOpen(true));
@@ -78,8 +91,8 @@ export default function App() {
 
   if (!hydrated) {
     return (
-      <div className="h-full w-full flex items-center justify-center text-ink-400">
-        Loading Braindump…
+      <div className="h-full w-full flex items-center justify-center text-fg-2">
+        <span className="display text-xl">Braindump</span>
       </div>
     );
   }
@@ -89,8 +102,8 @@ export default function App() {
   const regular = activeTab?.groups.filter((g) => !g.pinned) ?? [];
 
   return (
-    <div className="h-full w-full flex flex-col bg-ink-900 text-ink-100 select-none">
-      <div className="drag-region h-7 flex items-center px-3 text-[11px] uppercase tracking-[0.18em] text-ink-400">
+    <div className="h-full w-full flex flex-col bg-surface-0 text-fg-0 select-none">
+      <div className="drag-region h-8 flex items-center px-4 text-[10.5px] uppercase tracking-[0.22em] text-fg-3">
         <span className="no-drag">Braindump</span>
       </div>
 
@@ -99,13 +112,9 @@ export default function App() {
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 flex flex-col min-w-0">
           <Composer />
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+          <div className="flex-1 overflow-y-auto px-8 py-6 space-y-3">
             {pinned.length > 0 && activeTab && <PinnedRail tabId={activeTab.id} groups={pinned} />}
-            {regular.length === 0 && pinned.length === 0 && (
-              <div className="text-ink-500 text-sm italic pt-8 text-center">
-                No notes yet — start dumping. Press Ctrl+Enter to commit, Ctrl+Shift+R to Ramble.
-              </div>
-            )}
+            {regular.length === 0 && pinned.length === 0 && <EmptyState />}
             {activeTab &&
               regular.map((g) => (
                 <NoteGroup key={g.id} tabId={activeTab.id} group={g} />
@@ -123,6 +132,25 @@ export default function App() {
       {rambleOpen && <RambleDialog />}
       {historyForGroupId && <FormatHistory />}
       <Toast />
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="pt-10 flex flex-col items-center text-center gap-3 text-fg-2 fade-new">
+      <svg width="140" height="100" viewBox="0 0 140 100" fill="none" className="text-fg-3 opacity-60">
+        <path d="M20 70 C 35 40, 70 35, 85 60 C 95 80, 125 70, 125 60" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+        <circle cx="30" cy="72" r="3" fill="currentColor" />
+        <circle cx="60" cy="42" r="3" fill="currentColor" />
+        <circle cx="92" cy="60" r="3" fill="currentColor" />
+        <circle cx="124" cy="58" r="3" fill="currentColor" />
+      </svg>
+      <div className="display text-[26px] text-fg-1">A clean slate.</div>
+      <div className="text-[13px] text-fg-2 max-w-sm">
+        Start dumping thoughts. <span className="mono text-fg-1">Ctrl+Enter</span> commits a group ·{' '}
+        <span className="mono text-fg-1">Ctrl+Shift+R</span> to ramble · <span className="mono text-fg-1">Ctrl+Shift+B</span> to brainstorm.
+      </div>
     </div>
   );
 }

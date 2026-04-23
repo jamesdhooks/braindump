@@ -55,7 +55,18 @@ export type NoteGroup = {
   formattedHashes: string[];
   autoFormatOptOut?: boolean;
   brainstormId?: string;
+  category?: string;
+  suggestedTabId?: string;
 };
+
+export type Category = {
+  id: string;
+  label: string;
+  color: string;
+  icon?: string;
+};
+
+export type MotionPreset = 'calm' | 'floaty' | 'reduced';
 
 export type ArchiveEntry = {
   group: NoteGroup;
@@ -70,6 +81,8 @@ export type Tab = {
   order: number;
   groups: NoteGroup[];
   autoFormatEnabled?: boolean;
+  projectContext?: string;
+  aliases?: string[];
 };
 
 export type BrainstormMessage = {
@@ -133,6 +146,7 @@ export type PersistedStore = {
     focus: boolean;
     archiveOpen: boolean;
     brainstormOpen: boolean;
+    motion: MotionPreset;
     privacy: {
       neverSendPinned: boolean;
       redactEmails: boolean;
@@ -141,6 +155,7 @@ export type PersistedStore = {
     dailyDigestEnabled: boolean;
     semanticSearchEnabled: boolean;
   };
+  categories: Category[];
   usage: {
     perDay: Record<string, UsageDay>;
     monthlyCapUsd?: number;

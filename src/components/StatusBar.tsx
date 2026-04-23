@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Sparkles, Eye, EyeOff, Sun, Moon, Settings, MessageSquare } from 'lucide-react';
+import { Sparkles, Eye, EyeOff, Sun, Moon, Settings, MessageSquare, Wind, Minus } from 'lucide-react';
 import { useStore } from '../store';
 
 export function StatusBar() {
@@ -9,6 +9,8 @@ export function StatusBar() {
   const setFocus = useStore((s) => s.setFocusMode);
   const theme = useStore((s) => s.ui.theme);
   const setTheme = useStore((s) => s.setTheme);
+  const motion = useStore((s) => s.ui.motion);
+  const setMotion = useStore((s) => s.setMotion);
   const setSettings = useStore((s) => s.setSettingsOpen);
   const setBrainstorm = useStore((s) => s.setBrainstormOpen);
   const brainstormOpen = useStore((s) => s.ui.brainstormOpen);
@@ -29,41 +31,50 @@ export function StatusBar() {
       : status.state === 'queued'
       ? 'bg-amber-500'
       : afEnabled
-      ? 'bg-green-500'
-      : 'bg-ink-600';
+      ? 'bg-[var(--success)]'
+      : 'bg-[var(--fg-3)]';
+
+  const nextMotion: 'calm' | 'floaty' | 'reduced' = motion === 'calm' ? 'floaty' : motion === 'floaty' ? 'reduced' : 'calm';
+  const nextTheme: 'dark' | 'light' | 'system' = theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark';
 
   return (
-    <div className="flex items-center justify-between h-7 px-4 bg-ink-850 border-t border-ink-800 text-[11px] text-ink-400">
-      <div className="flex items-center gap-3">
+    <div className="flex items-center justify-between h-7 px-5 bg-surface-1 border-t border-hairline text-[11px] text-fg-2">
+      <div className="flex items-center gap-4">
         <button
-          className={clsx('flex items-center gap-1.5 hover:text-ink-100', afEnabled && 'text-ink-200')}
+          className={clsx('flex items-center gap-1.5 hover:text-fg-0', afEnabled && 'text-fg-1')}
           onClick={() => useStore.getState().setAutoFormatConfig({ enabled: !afEnabled })}
           title={`Auto-format ${afEnabled ? 'on' : 'off'}${status.lastAction ? ` — ${status.lastAction}` : ''}`}
         >
           <span className={clsx('w-1.5 h-1.5 rounded-full', dot)} />
           <Sparkles size={11} />
           Auto-format {afEnabled ? 'on' : 'off'}
-          {status.queued > 0 && <span className="ml-1 text-ink-500">({status.queued} queued)</span>}
+          {status.queued > 0 && <span className="ml-1 text-fg-3">({status.queued} queued)</span>}
         </button>
         <span>{activeTab?.groups.length ?? 0} groups</span>
         <span>{wordCount} words</span>
       </div>
-      <div className="flex items-center gap-2">
-        <span className="text-ink-500">Ctrl+Enter commit · Ctrl+Shift+R ramble · Ctrl+Shift+B brainstorm · Ctrl+F search</span>
-        <button onClick={() => setBrainstorm(!brainstormOpen)} className="p-1 hover:text-ink-100" title="Brainstorm (Ctrl+Shift+B)">
+      <div className="flex items-center gap-1.5">
+        <button onClick={() => setBrainstorm(!brainstormOpen)} className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0" title="Brainstorm (Ctrl+Shift+B)">
           <MessageSquare size={12} />
         </button>
-        <button onClick={() => setFocus(!focus)} className="p-1 hover:text-ink-100" title="Focus mode (F11)">
+        <button onClick={() => setFocus(!focus)} className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0" title="Focus mode (F11)">
           {focus ? <EyeOff size={12} /> : <Eye size={12} />}
         </button>
         <button
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="p-1 hover:text-ink-100"
-          title="Toggle theme"
+          onClick={() => setMotion(nextMotion)}
+          className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0"
+          title={`Motion: ${motion} → ${nextMotion} (Ctrl+Shift+M)`}
+        >
+          {motion === 'reduced' ? <Minus size={12} /> : <Wind size={12} />}
+        </button>
+        <button
+          onClick={() => setTheme(nextTheme)}
+          className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0"
+          title={`Theme: ${theme} → ${nextTheme}`}
         >
           {theme === 'dark' ? <Sun size={12} /> : <Moon size={12} />}
         </button>
-        <button onClick={() => setSettings(true)} className="p-1 hover:text-ink-100" title="Settings (Ctrl+,)">
+        <button onClick={() => setSettings(true)} className="p-1.5 rounded hover:bg-surface-3 hover:text-fg-0" title="Settings (Ctrl+,)">
           <Settings size={12} />
         </button>
       </div>

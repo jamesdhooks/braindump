@@ -15,6 +15,20 @@ import type {
 import { extractHashtags, splitIntoGroups } from '../lib/groupSplit';
 import { hashLine } from '../lib/contentHash';
 
+export function applyThemeToDom(theme: 'dark' | 'light' | 'system') {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  let effective: 'dark' | 'light' = 'dark';
+  if (theme === 'system') {
+    effective = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } else {
+    effective = theme;
+  }
+  root.setAttribute('data-theme', effective);
+  if (effective === 'dark') root.classList.add('dark');
+  else root.classList.remove('dark');
+}
+
 type UIOnly = {
   hoverTargetGroupId: string | null;
   lockedTargetGroupId: string | null;
@@ -73,6 +87,7 @@ export type StoreState = PersistedStore &
     setBrainstormOpen: (open: boolean) => void;
     setFocusMode: (on: boolean) => void;
     setTheme: (theme: 'dark' | 'light' | 'system') => void;
+    setMotion: (m: 'calm' | 'floaty' | 'reduced') => void;
     setAutoFormatStatus: (s: AutoFormatStatus) => void;
     flashRecentlyFormatted: (groupId: string) => void;
 
@@ -137,10 +152,16 @@ export const useStore = create<StoreState>()(
       focus: false,
       archiveOpen: false,
       brainstormOpen: false,
+      motion: 'calm',
       privacy: { neverSendPinned: true, redactEmails: true, redactApiLikeStrings: true },
       dailyDigestEnabled: false,
       semanticSearchEnabled: true
     },
+    categories: [
+      { id: 'quick-thought', label: 'Quick thought', color: '#8ab4ff' },
+      { id: 'code-feature', label: 'Code feature', color: '#9effc7' },
+      { id: 'household-todo', label: 'Household todo', color: '#ffd38a' }
+    ],
     usage: { perDay: {} },
     hydrated: false,
 
@@ -168,6 +189,7 @@ export const useStore = create<StoreState>()(
           featureProviderOverrides: s.featureProviderOverrides,
           autoFormat: s.autoFormat,
           ui: s.ui,
+          categories: s.categories,
           usage: s.usage
         };
         void window.braindump.setState(persisted);
@@ -490,9 +512,15 @@ export const useStore = create<StoreState>()(
       set((s) => {
         s.ui.theme = theme;
       });
+      applyThemeToDom(theme);
+      get().persist();
+    },
+    setMotion(m) {
+      set((s) => {
+        s.ui.motion = m;
+      });
       if (typeof document !== 'undefined') {
-        if (theme === 'dark') document.documentElement.classList.add('dark');
-        else if (theme === 'light') document.documentElement.classList.remove('dark');
+        document.documentElement.setAttribute('data-motion', m);
       }
       get().persist();
     },

@@ -1,6 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { PersistedStore, LLMMessage, LLMResult, AutoFormatStatus } from '../src/types';
 
+type SkillResult<T> = {
+  ok: boolean;
+  value: T | null;
+  raw: string;
+  error?: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+};
+
 type StreamHandle = {
   id: string;
   cancel: () => void;
@@ -156,6 +167,48 @@ const api = {
     getLoginItem: () => ipcRenderer.invoke('app:get-login-item') as Promise<boolean>,
     openFileDialog: () => ipcRenderer.invoke('dialog:open-file') as Promise<string | null>,
     openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url)
+  },
+
+  skill: {
+    ramble: (args: { monologue: string; projectContext?: string }) => ipcRenderer.invoke('skill:ramble', args) as Promise<SkillResult<{ lines: string[] }>>,
+    capture: (args: { transcript: string; projectContext?: string }) =>
+      ipcRenderer.invoke('skill:capture', args) as Promise<SkillResult<{ lines: string[]; suggested_tab?: string | null; suggested_title?: string | null }>>,
+    tag: (lines: string[]) => ipcRenderer.invoke('skill:tag', { lines }) as Promise<SkillResult<{ tags: string[] }>>,
+    tasks: (lines: string[]) => ipcRenderer.invoke('skill:tasks', { lines }) as Promise<SkillResult<{ tasks: string[] }>>,
+    explainBack: (lines: string[]) => ipcRenderer.invoke('skill:explain-back', { lines }) as Promise<SkillResult<{ summary: string; questions?: string[] }>>,
+    categorize: (args: {
+      lines: string[];
+      categories: { id: string; label: string }[];
+      tabs: { id: string; name: string; projectContext?: string; aliases?: string[] }[];
+      currentTabId: string;
+    }) => ipcRenderer.invoke('skill:categorize', args) as Promise<SkillResult<{ category: string; suggestedTabId: string | null; confidence: number }>>,
+    projectContext: (args: { tabName: string; recentLines: string[] }) =>
+      ipcRenderer.invoke('skill:project-context', args) as Promise<SkillResult<{ summary: string; aliases?: string[] }>>,
+    dailyReport: (args: unknown) => ipcRenderer.invoke('skill:daily-report', args) as Promise<SkillResult<unknown>>,
+    stalePulse: (args: unknown) => ipcRenderer.invoke('skill:stale-pulse', args) as Promise<SkillResult<unknown>>,
+    template: (id: 'meeting' | 'decision' | 'postmortem') => ipcRenderer.invoke('skill:template', { id }) as Promise<SkillResult<{ lines: string[] }>>
+  },
+
+  persistence: {
+    status: () => ipcRenderer.invoke('persistence:status') as Promise<{
+      loadInfo: { source: 'primary' | 'backup' | 'none'; backupIndex?: number; recovered: boolean } | null;
+      writeStatus: { lastWriteOk: number; lastWriteError: string | null };
+      dataFolder: string;
+      backups: { index: number; path: string; mtime: number | null; size: number | null }[];
+    }>,
+    setFsync: (on: boolean) => ipcRenderer.invoke('persistence:set-fsync', { on }),
+    openFolder: () => ipcRenderer.invoke('persistence:open-folder') as Promise<string>,
+    exportAll: () => ipcRenderer.invoke('persistence:export') as Promise<{ canceled: boolean; path?: string }>,
+    importAll: () => ipcRenderer.invoke('persistence:import') as Promise<{ canceled: boolean; ok?: boolean; error?: string }>,
+    revertBackup: (index: number) => ipcRenderer.invoke('persistence:revert-backup', { index }) as Promise<{ ok: boolean }>,
+    revertSnapshot: () => ipcRenderer.invoke('persistence:revert-snapshot') as Promise<{ ok: boolean }>,
+    onRecovered: (cb: (p: { source: string; backupIndex: number | null }) => void): (() => void) => {
+      const l = (_e: unknown, p: { source: string; backupIndex: number | null }) => cb(p);
+      ipcRenderer.on('persistence:recovered', l);
+      return () => {
+        ipcRenderer.removeListener('persistence:recovered', l);
+      };
+    }
   }
 };
 

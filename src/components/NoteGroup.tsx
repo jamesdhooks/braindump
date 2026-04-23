@@ -5,8 +5,7 @@ import { useStore } from '../store';
 import type { NoteGroup as NoteGroupT, Tab } from '../types';
 import { renderInlineMarkdown } from '../lib/markdown';
 import { ImageAttachment } from './ImageAttachment';
-import { llmJson } from '../lib/llmClient';
-import { activeProviderIdForFeature } from './Settings/util';
+import { MotionCard } from '../motion/MotionCard';
 
 export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }) {
   const setHover = useStore((s) => s.setHoverTarget);
@@ -20,8 +19,6 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
   const togglePin = useStore((s) => s.togglePin);
   const updateGroupLines = useStore((s) => s.updateGroupLines);
   const recentlyFormatted = useStore((s) => s.recentlyFormatted[group.id]);
-  const overrides = useStore((s) => s.featureProviderOverrides);
-  const active = useStore((s) => s.activeProviderId);
   const tabs = useStore((s) => s.tabs);
   const newTab = useStore((s) => s.newTab);
   const addGroupLines = useStore((s) => s.addGroupLines);
@@ -40,39 +37,24 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
   }, [isFocused]);
 
   async function explainBack() {
-    const provId = activeProviderIdForFeature('brainstorm', overrides, active);
-    const res = await llmJson<{ summary: string; questions?: string[] }>({
-      providerId: provId,
-      feature: 'other',
-      messages: [
-        { role: 'system', content: "Rephrase the user's note group back in 1-2 short sentences. Return ONLY JSON: { \"summary\": string, \"questions\": string[] }." },
-        { role: 'user', content: group.lines.join('\n') }
-      ]
-    });
-    if (res?.summary) {
+    const res = await window.braindump.skill.explainBack(group.lines);
+    if (res.ok && res.value?.summary) {
+      const q = res.value.questions ?? [];
       setExplainOpen(
-        [res.summary, ...(res.questions?.length ? ['', ...res.questions.map((q) => `? ${q}`)] : [])].join('\n')
+        [res.value.summary, ...(q.length ? ['', ...q.map((qq) => `? ${qq}`)] : [])].join('\n')
       );
     }
   }
 
   async function extractTasks() {
-    const provId = activeProviderIdForFeature('ramble', overrides, active);
-    const res = await llmJson<{ tasks: string[] }>({
-      providerId: provId,
-      feature: 'other',
-      messages: [
-        { role: 'system', content: 'Extract actionable todo items from this note group. Each task is a short imperative line prefixed with "[ ] ". Return ONLY JSON: { "tasks": string[] }.' },
-        { role: 'user', content: group.lines.join('\n') }
-      ]
-    });
-    if (!res?.tasks?.length) return;
+    const res = await window.braindump.skill.tasks(group.lines);
+    if (!res.ok || !res.value?.tasks?.length) return;
     let tasksTab = tabs.find((t) => t.name.toLowerCase() === 'tasks') as Tab | undefined;
     if (!tasksTab) {
       const id = newTab('Tasks');
       tasksTab = useStore.getState().tabs.find((t) => t.id === id);
     }
-    if (tasksTab) addGroupLines(tasksTab.id, res.tasks, false, 'user');
+    if (tasksTab) addGroupLines(tasksTab.id, res.value.tasks, false, 'user');
     setMenuOpen(false);
   }
 
@@ -98,22 +80,22 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
   }
 
   return (
-    <div
+    <MotionCard
       ref={ref}
       tabIndex={0}
       onFocus={() => setFocused(group.id)}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       onClick={onClick}
+      layout
       className={clsx(
-        'note-card group relative rounded-lg border px-4 py-3 fade-new outline-none',
-        isTarget
-          ? 'bg-accent-500/10 border-accent-500/60'
-          : 'bg-ink-800/60 border-ink-750 hover:border-ink-700',
-        isFocused && 'ring-1 ring-accent-500',
-        group.pinned && 'border-l-2 border-l-accent-500',
+        'card group relative px-5 py-4 outline-none',
+        isTarget && 'is-target',
+        isFocused && 'is-focused',
+        group.pinned && 'border-l-2 pinned-bob',
         recentlyFormatted && 'format-flash'
       )}
+      style={group.pinned ? { borderLeftColor: 'var(--accent-500)' } : undefined}
     >
       <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
@@ -265,6 +247,6 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
         {group.pinned && <span className="text-accent-400">pinned</span>}
         {group.history.some((r) => r.source === 'auto-format') && <span>✨ edited</span>}
       </div>
-    </div>
+    </MotionCard>
   );
 }

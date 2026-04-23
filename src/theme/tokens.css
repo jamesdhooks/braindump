@@ -1,0 +1,100 @@
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/fraunces/400.css';
+@import '@fontsource/fraunces/500.css';
+
+:root {
+  /* shared non-color tokens */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+
+  --shadow-card: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 12px 40px -24px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 24px 60px -20px rgba(0, 0, 0, 0.6);
+
+  --ease-spring: linear(
+    0, 0.003, 0.012, 0.026, 0.046, 0.073, 0.107, 0.15, 0.2, 0.26,
+    0.33, 0.41, 0.5, 0.58, 0.67, 0.74, 0.81, 0.86, 0.92, 0.96, 0.99, 1, 1
+  );
+}
+
+:root[data-theme='dark'],
+:root.dark {
+  color-scheme: dark;
+
+  --surface-0: #0c0e13;
+  --surface-1: #12141a;
+  --surface-2: #171a21;
+  --surface-3: #1d2129;
+  --surface-4: #242932;
+
+  --fg-0: #e7e9ef;
+  --fg-1: #aeb3c0;
+  --fg-2: #7a8192;
+  --fg-3: #535a6a;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  --accent-400: #a5b0ff;
+  --accent-500: #7c8cff;
+  --accent-600: #5d6fff;
+  --accent-glow: rgba(124, 140, 255, 0.22);
+
+  --success: #7cdfa5;
+  --warning: #ffc069;
+  --danger: #ff7a8a;
+  --info: #73c8ff;
+
+  --hairline: rgba(255, 255, 255, 0.06);
+  --backdrop: rgba(5, 6, 10, 0.55);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --surface-0: #f6f7fb;
+  --surface-1: #ffffff;
+  --surface-2: #f1f2f7;
+  --surface-3: #e7e9f0;
+  --surface-4: #dadce5;
+
+  --fg-0: #1a1d25;
+  --fg-1: #42475a;
+  --fg-2: #5b6174;
+  --fg-3: #8f95a6;
+
+  --border-subtle: rgba(12, 14, 19, 0.07);
+  --border-strong: rgba(12, 14, 19, 0.18);
+
+  --accent-400: #4a5cff;
+  --accent-500: #3545e5;
+  --accent-600: #2633c1;
+  --accent-glow: rgba(53, 69, 229, 0.14);
+
+  --success: #2d9d66;
+  --warning: #c07905;
+  --danger: #d9314a;
+  --info: #0984d2;
+
+  --hairline: rgba(12, 14, 19, 0.08);
+  --backdrop: rgba(200, 202, 210, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ease-spring: ease-out;
+  }
+}

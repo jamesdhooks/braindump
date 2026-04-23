@@ -1,12 +1,34 @@
 import { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, clipboard, shell, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { getState, setState, patchState, resetState } from './store';
+import { getState, setState, patchState, resetState, initStore, getLoadInfo } from './store';
 import { getSecret, setSecret, deleteSecret, hasSecret, listSecretKeys } from './secrets';
 import { saveBufferAsAttachment, saveFromPath, readAttachmentBase64, deleteAttachment } from './attachments';
 import { complete, embed, vision, listModels, secretKeyForProvider } from './llm/index';
+import {
+  runRamble,
+  runCapture,
+  runTag,
+  runTasks,
+  runExplainBack,
+  runCategorize,
+  runProjectContext,
+  runDailyReport,
+  runStalePulse,
+  runTemplate
+} from './llm/skills';
 import { autoFormatter } from './llm/autoFormat';
 import { ensureEmbeddings, semanticSearch, dropEmbeddings } from './llm/embeddings';
+import {
+  dataFolder,
+  getWriteStatus,
+  setFsyncMode,
+  listBackupInfo,
+  revertToBackup,
+  revertToSnapshot,
+  exportToFile,
+  importFromFile
+} from './persistence';
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const IS_DEV = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -385,13 +407,106 @@ function wireIpc() {
   ipcMain.handle('capture:submit', (_e, { tabId, text }: { tabId: string | null; text: string }) => {
     mainWindow?.webContents.send('capture:submit', { tabId, text });
   });
+
+  ipcMain.handle('skill:ramble', async (_e, args: { monologue: string; projectContext?: string }) => {
+    return runRamble(args);
+  });
+  ipcMain.handle('skill:capture', async (_e, args: { transcript: string; projectContext?: string }) => {
+    return runCapture(args);
+  });
+  ipcMain.handle('skill:tag', async (_e, args: { lines: string[] }) => runTag(args.lines));
+  ipcMain.handle('skill:tasks', async (_e, args: { lines: string[] }) => runTasks(args.lines));
+  ipcMain.handle('skill:explain-back', async (_e, args: { lines: string[] }) => runExplainBack(args.lines));
+  ipcMain.handle(
+    'skill:categorize',
+    async (
+      _e,
+      args: {
+        lines: string[];
+        categories: { id: string; label: string }[];
+        tabs: { id: string; name: string; projectContext?: string; aliases?: string[] }[];
+        currentTabId: string;
+      }
+    ) => runCategorize(args)
+  );
+  ipcMain.handle('skill:project-context', async (_e, args: { tabName: string; recentLines: string[] }) => runProjectContext(args));
+  ipcMain.handle('skill:daily-report', async (_e, args) => runDailyReport(args));
+  ipcMain.handle('skill:stale-pulse', async (_e, args) => runStalePulse(args));
+  ipcMain.handle('skill:template', async (_e, args: { id: 'meeting' | 'decision' | 'postmortem' }) => runTemplate(args.id));
+
+  ipcMain.handle('persistence:status', () => ({
+    loadInfo: getLoadInfo(),
+    writeStatus: getWriteStatus(),
+    dataFolder: dataFolder(),
+    backups: listBackupInfo()
+  }));
+  ipcMain.handle('persistence:set-fsync', (_e, { on }: { on: boolean }) => {
+    setFsyncMode(on);
+  });
+  ipcMain.handle('persistence:open-folder', () => {
+    void shell.openPath(dataFolder());
+    return dataFolder();
+  });
+  ipcMain.handle('persistence:export', async () => {
+    const r = await dialog.showSaveDialog({
+      title: 'Export Braindump data',
+      defaultPath: `braindump-export-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'Braindump JSON', extensions: ['json'] }]
+    });
+    if (r.canceled || !r.filePath) return { canceled: true };
+    exportToFile(r.filePath, getState());
+    return { canceled: false, path: r.filePath };
+  });
+  ipcMain.handle('persistence:import', async () => {
+    const r = await dialog.showOpenDialog({
+      title: 'Import Braindump data',
+      properties: ['openFile'],
+      filters: [{ name: 'Braindump JSON', extensions: ['json'] }]
+    });
+    if (r.canceled || !r.filePaths[0]) return { canceled: true };
+    const parsed = importFromFile(r.filePaths[0]);
+    if (!parsed) return { canceled: false, ok: false, error: 'File is not a valid Braindump export' };
+    setState(parsed);
+    broadcastState();
+    updateTray();
+    return { canceled: false, ok: true };
+  });
+  ipcMain.handle('persistence:revert-backup', (_e, { index }: { index: number }) => {
+    const s = revertToBackup(index);
+    if (s) {
+      setState(s);
+      broadcastState();
+      updateTray();
+      return { ok: true };
+    }
+    return { ok: false };
+  });
+  ipcMain.handle('persistence:revert-snapshot', () => {
+    const s = revertToSnapshot();
+    if (s) {
+      setState(s);
+      broadcastState();
+      updateTray();
+      return { ok: true };
+    }
+    return { ok: false };
+  });
 }
 
 app.whenReady().then(() => {
+  const load = initStore();
   createMainWindow();
   createTray();
   registerGlobalShortcuts();
   wireIpc();
+  if (load.recovered) {
+    setTimeout(() => {
+      mainWindow?.webContents.send('persistence:recovered', {
+        source: load.source,
+        backupIndex: load.backupIndex ?? null
+      });
+    }, 1500);
+  }
 });
 
 app.on('window-all-closed', () => {

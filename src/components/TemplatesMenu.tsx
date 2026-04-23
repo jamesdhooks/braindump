@@ -1,38 +1,21 @@
 import { useState } from 'react';
 import { FileText } from 'lucide-react';
 import { useStore } from '../store';
-import { llmJson } from '../lib/llmClient';
-import { activeProviderIdForFeature } from './Settings/util';
 
 const TEMPLATE_IDS = ['meeting', 'decision', 'postmortem'] as const;
-
-const TEMPLATE_SYSTEM: Record<string, string> = {
-  meeting: 'Expand "/meeting" into a meeting-note scaffold as stepped atomic lines (attendees, agenda items, decisions, next steps). Return ONLY JSON: { "lines": string[] }.',
-  decision: 'Expand "/decision" into a decision-record scaffold (context, options considered, choice, rationale, follow-ups) as stepped atomic lines. Return ONLY JSON: { "lines": string[] }.',
-  postmortem: 'Expand "/postmortem" into an incident post-mortem scaffold (timeline, impact, root cause, what went well, what did not, action items) as stepped atomic lines. Return ONLY JSON: { "lines": string[] }.'
-};
 
 export function TemplatesMenu({ onInsert }: { onInsert: (lines: string[]) => void }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const providers = useStore((s) => s.providers);
-  const overrides = useStore((s) => s.featureProviderOverrides);
   const active = useStore((s) => s.activeProviderId);
 
   async function insert(id: (typeof TEMPLATE_IDS)[number]) {
     setLoading(id);
     try {
-      const provId = activeProviderIdForFeature('ramble', overrides, active);
-      const res = await llmJson<{ lines: string[] }>({
-        providerId: provId,
-        feature: 'ramble',
-        messages: [
-          { role: 'system', content: TEMPLATE_SYSTEM[id] },
-          { role: 'user', content: `Produce the /${id} scaffold now.` }
-        ]
-      });
-      if (res?.lines?.length) {
-        onInsert(res.lines);
+      const res = await window.braindump.skill.template(id);
+      if (res.ok && res.value?.lines?.length) {
+        onInsert(res.value.lines);
       } else {
         const fallback: Record<string, string[]> = {
           meeting: ['Meeting:', 'Attendees:', 'Agenda:', '- ', 'Decisions:', '- ', 'Next steps:', '- '],
