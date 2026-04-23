@@ -81,6 +81,23 @@ export default function App() {
   }, [hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
+    const unsub = window.braindump.sync.onOps((ops) => {
+      void import('@bd/core').then(({ applyOps }) => {
+        const st = useStore.getState();
+        const input = { tabs: st.tabs, archive: st.archive } as unknown as Parameters<typeof applyOps>[0];
+        const next = applyOps(input, ops as unknown as Parameters<typeof applyOps>[1]);
+        useStore.setState((s) => {
+          s.tabs = next.tabs as unknown as typeof s.tabs;
+          s.archive = next.archive as unknown as typeof s.archive;
+        });
+        st.persist();
+      });
+    });
+    return () => unsub();
+  }, [hydrated]);
+
+  useEffect(() => {
     if (!dailyDigestEnabled || !hydrated) return;
     void runDailyReportIfDue(false);
     const t = window.setTimeout(() => void runStalePulse(false), 8000);

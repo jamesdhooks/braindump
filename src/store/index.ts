@@ -341,25 +341,25 @@ export const useStore = create<StoreState>()(
 
     addGroupLines(tabId, lines, pinned, source = 'user', brainstormId) {
       const id = nanoid(10);
+      const now = Date.now();
+      const group: NoteGroup = {
+        id,
+        lines,
+        createdAt: now,
+        updatedAt: now,
+        pinned: Boolean(pinned),
+        tags: extractHashtags(lines),
+        history: [{ id: nanoid(8), at: now, source, lines: [...lines] }],
+        formattedHashes: [],
+        brainstormId
+      };
       set((s) => {
         const tab = s.tabs.find((t) => t.id === tabId);
         if (!tab) return;
-        const now = Date.now();
-        const group: NoteGroup = {
-          id,
-          lines,
-          createdAt: now,
-          updatedAt: now,
-          pinned: Boolean(pinned),
-          tags: extractHashtags(lines),
-          history: [{ id: nanoid(8), at: now, source, lines: [...lines] }],
-          formattedHashes: [],
-          brainstormId
-        };
         tab.groups.unshift(group);
       });
       get().persist();
-      // best-effort auto-categorize for freshly-committed groups
+      void window.braindump?.sync?.enqueue('addGroup', { tabId, group });
       if (typeof window !== 'undefined' && window.braindump?.skill) {
         setTimeout(() => {
           void get().autoCategorizeGroup(tabId, id);
@@ -396,14 +396,17 @@ export const useStore = create<StoreState>()(
     },
 
     togglePin(tabId, groupId) {
+      let nextPinned = false;
       set((s) => {
         const g = s.tabs.find((x) => x.id === tabId)?.groups.find((x) => x.id === groupId);
         if (g) {
           g.pinned = !g.pinned;
           g.updatedAt = Date.now();
+          nextPinned = g.pinned;
         }
       });
       get().persist();
+      void window.braindump?.sync?.enqueue('togglePin', { tabId, groupId, pinned: nextPinned });
     },
     setAutoFormatOptOut(tabId, groupId, opt) {
       set((s) => {
@@ -436,6 +439,7 @@ export const useStore = create<StoreState>()(
         });
       }
       get().persist();
+      void window.braindump?.sync?.enqueue('archiveGroup', { tabId, groupId, completedAt: now });
     },
     restoreFromArchive(archiveIndex) {
       set((s) => {
@@ -751,9 +755,11 @@ export const useStore = create<StoreState>()(
         g.updatedAt = Date.now();
       });
       get().persist();
+      void window.braindump?.sync?.enqueue('setCategory', { tabId, groupId, category });
     },
     moveGroup(fromTabId, toTabId, groupId) {
       if (fromTabId === toTabId) return;
+      void window.braindump?.sync?.enqueue('moveGroup', { fromTabId, toTabId, groupId });
       set((s) => {
         const src = s.tabs.find((x) => x.id === fromTabId);
         const dst = s.tabs.find((x) => x.id === toTabId);

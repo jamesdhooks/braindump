@@ -259,6 +259,38 @@ const api = {
     }
   },
 
+  sync: {
+    status: () => ipcRenderer.invoke('sync:status') as Promise<{
+      configured: boolean;
+      online: boolean;
+      lastPush?: number;
+      lastPull?: number;
+      outboxDepth: number;
+      error?: string;
+    }>,
+    settings: () => ipcRenderer.invoke('sync:settings') as Promise<{
+      serverUrl: string;
+      deviceId?: string;
+      signedInEmail?: string;
+      hasToken: boolean;
+    }>,
+    signIn: (args: { serverUrl: string; email: string; password: string; deviceName: string }) =>
+      ipcRenderer.invoke('sync:signin', args) as Promise<{ ok: boolean; error?: string }>,
+    signOut: () => ipcRenderer.invoke('sync:signout'),
+    enqueue: (kind: string, payload: unknown) => ipcRenderer.invoke('sync:enqueue', { kind, payload }),
+    resetAndRepull: () => ipcRenderer.invoke('sync:reset-and-repull') as Promise<{ ok: boolean }>,
+    onStatus: (cb: (s: { configured: boolean; online: boolean; outboxDepth: number; error?: string; lastPush?: number; lastPull?: number }) => void): (() => void) => {
+      const l = (_e: unknown, s: Parameters<typeof cb>[0]) => cb(s);
+      ipcRenderer.on('sync:status', l);
+      return () => ipcRenderer.removeListener('sync:status', l);
+    },
+    onOps: (cb: (ops: { seq: number; clientId: string; lamport: number; kind: string; payload: unknown; appliedAt: number }[]) => void): (() => void) => {
+      const l = (_e: unknown, ops: Parameters<typeof cb>[0]) => cb(ops);
+      ipcRenderer.on('sync:ops', l);
+      return () => ipcRenderer.removeListener('sync:ops', l);
+    }
+  },
+
   persistence: {
     status: () => ipcRenderer.invoke('persistence:status') as Promise<{
       loadInfo: { source: 'primary' | 'backup' | 'none'; backupIndex?: number; recovered: boolean } | null;

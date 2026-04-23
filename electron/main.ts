@@ -21,6 +21,7 @@ import { runClawDraft } from './llm/skills/clawDraft';
 import { clawBroker } from './claw/broker';
 import { ensureDefaultSkills, listSkills, writeSkill, deleteSkill, openSkillsFolder } from './claw/skills';
 import { isDangerous } from '../packages/claw/protocol';
+import * as sync from './sync/client';
 import crypto from 'node:crypto';
 import { autoFormatter } from './llm/autoFormat';
 import { ensureEmbeddings, semanticSearch, dropEmbeddings } from './llm/embeddings';
@@ -100,7 +101,11 @@ function createMainWindow() {
   mainWindow.loadURL(resolveIndex('main'));
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
-    if (mainWindow) clawBroker.attachWindow(mainWindow);
+    if (mainWindow) {
+      clawBroker.attachWindow(mainWindow);
+      sync.attachWindow(mainWindow);
+      sync.startFlusher();
+    }
   });
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
@@ -562,6 +567,31 @@ function wireIpc() {
     return listSkills();
   });
   ipcMain.handle('claw-skills:open-folder', () => openSkillsFolder());
+
+  ipcMain.handle('sync:status', () => sync.currentStatus());
+  ipcMain.handle('sync:settings', () => ({ ...sync.currentSettings(), hasToken: sync.currentStatus().configured }));
+  ipcMain.handle(
+    'sync:signin',
+    async (_e, args: { serverUrl: string; email: string; password: string; deviceName: string }) => {
+      try {
+        await sync.signIn(args);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: String(err).slice(0, 200) };
+      }
+    }
+  );
+  ipcMain.handle('sync:signout', () => {
+    sync.signOut();
+    return { ok: true };
+  });
+  ipcMain.handle('sync:enqueue', (_e, args: { kind: string; payload: unknown }) => {
+    sync.enqueue(args.kind, args.payload);
+  });
+  ipcMain.handle('sync:reset-and-repull', async () => {
+    await sync.resetAndRepull();
+    return { ok: true };
+  });
 }
 
 app.whenReady().then(() => {

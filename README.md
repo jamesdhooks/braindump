@@ -132,21 +132,42 @@ Settings → Privacy & cost includes export/import, open-data-folder, and revert
 ## Architecture
 
 ```
-electron/         # main process: tray, IPC, persistence, LLM broker, skill runner
-  llm/
-    skills/       # Zod-validated skill modules (format, ramble, categorize, …)
-    openai/anthropic/gemini/ollama.ts
-    embeddings.ts
-    autoFormat.ts # background queue with per-line hashing + rate limit
-  persistence.ts  # atomic write + rolling backups + snapshot recovery
-  migrations.ts
-src/              # React renderer
-  theme/tokens.css
-  motion/         # framer-motion presets: calm / floaty / reduced
-  store/          # zustand + immer; persists via IPC
-  components/     # Composer, NoteGroup, TabBar, Archive, Settings, Ramble, Brainstorm, …
-  hooks/
+electron/                 # main process: tray, IPC, persistence, broker, skill runner
+  llm/skills/             # Zod-validated skills (format, ramble, categorize, …)
+  claw/                   # broker + bundled shim control + skills folder
+  sync/                   # outbox + client for the op-log API
+  persistence.ts          # atomic write + rolling backups + snapshot recovery
+src/
+  theme/tokens.css        # light + dark design tokens
+  motion/                 # framer-motion presets: calm / floaty / reduced
+  store/                  # zustand + immer; persists via IPC
+  components/             # Composer, NoteGroup, TabBar, Archive, Settings, Ramble, …
+  claw/                   # ClawBridge, JobPanel, SkillsEditor, DraftDialog
+  lib/scheduler.ts        # daily report + pulse scheduler (renderer-side)
+packages/
+  core/                   # shared types, schema (Zod), op-log reducer
+  claw/                   # Claw protocol (NDJSON) + safety guard
+apps/
+  api/                    # Hono + Drizzle + Lucia-style auth, op push/pull/SSE
+  web/                    # Next.js live view, read-only (reuses applyOps reducer)
+infra/
+  docker/                 # api.Dockerfile, web.Dockerfile
+  compose.yml             # postgres + migrate + api + web
+resources/openclaw-shim/  # bundled Node fallback broker (wraps `claude` CLI)
 ```
+
+## Web + sync
+
+A self-hosted companion web app plus an op-log-based sync pipeline:
+
+```bash
+cd infra && docker compose up -d   # postgres + api (3001) + web (3000) + migrate
+```
+
+Sign up at `http://localhost:3000/signup`, then on desktop go to Settings →
+Sync, point at `http://localhost:3001`, sign in and name your device. Local
+writes keep working offline; the outbox flushes when the server is reachable,
+and the web app subscribes to `/v1/ops/stream` for live updates.
 
 ## Contributing
 

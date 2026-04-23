@@ -1,0 +1,30 @@
+:root {
+  --bg-0: #0c0e13;
+  --bg-1: #12141a;
+  --bg-2: #171a21;
+  --fg-0: #e7e9ef;
+  --fg-1: #aeb3c0;
+  --fg-2: #7a8192;
+  --accent: #7c8cff;
+  --hairline: rgba(255, 255, 255, 0.06);
+  color-scheme: dark;
+}
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+* { box-sizing: border-box; }
+a { color: var(--accent); }
+input, button {
+  font: inherit;
+}
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 16px 20px;
+}

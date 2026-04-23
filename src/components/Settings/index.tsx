@@ -8,8 +8,9 @@ import { GeneralSettings } from './GeneralSettings';
 import { ShortcutsSettings } from './ShortcutsSettings';
 import { ProjectSettings } from './ProjectSettings';
 import { ClawSettings } from './ClawSettings';
+import { SyncSettings } from './SyncSettings';
 
-type Tab = 'general' | 'project' | 'llm' | 'autoformat' | 'claw' | 'privacy' | 'shortcuts';
+type Tab = 'general' | 'project' | 'llm' | 'autoformat' | 'claw' | 'sync' | 'privacy' | 'shortcuts';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -17,6 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'llm', label: 'LLM' },
   { id: 'autoformat', label: 'Auto-format' },
   { id: 'claw', label: 'Claw' },
+  { id: 'sync', label: 'Sync' },
   { id: 'privacy', label: 'Privacy & cost' },
   { id: 'shortcuts', label: 'Shortcuts' }
 ];
@@ -59,6 +61,7 @@ export function SettingsDrawer() {
             {tab === 'llm' && <LLMSettings />}
             {tab === 'autoformat' && <AutoFormatSettings />}
             {tab === 'claw' && <ClawSettings />}
+            {tab === 'sync' && <SyncSettings />}
             {tab === 'privacy' && <PrivacySettings />}
             {tab === 'shortcuts' && <ShortcutsSettings />}
           </div>
