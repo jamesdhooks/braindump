@@ -16,6 +16,14 @@ import { extractHashtags } from '../lib/groupSplit';
 import { hashLine } from '../lib/contentHash';
 import { advancePrioritySortAt, getGroupDisplayBucket, groupPriorityRank } from '../lib/groupPriority';
 import { isTaskRenderMode, normalizeTaskModeLines, parseTaskLine, toTaskMarkdownLine } from '../lib/taskMode';
+import {
+  buildSendToNeoReview,
+  promoteNoteGroupToTaskCard,
+  type SendToNeoReview,
+  type TaskOutboxEvent,
+  type NoteGroup as CoreNoteGroup,
+  type Tab as CoreTab
+} from '../../packages/core';
 
 function sortGroupsByPriorityOrder(groups: NoteGroup[]) {
   return groups
@@ -172,6 +180,9 @@ export type StoreState = PersistedStore &
     togglePin: (tabId: string, groupId: string) => void;
     setAutoFormatOptOut: (tabId: string, groupId: string, opt: boolean) => void;
     setGroupRenderAs: (tabId: string, groupId: string, renderAs?: import('../types').GroupRenderAs) => void;
+    promoteGroupToTask: (tabId: string, groupId: string) => string | null;
+    buildTaskSendReview: (taskId: string) => SendToNeoReview | null;
+    sendTaskToNeo: (taskId: string) => SendToNeoReview | null;
     toggleSubState: (tabId: string, groupId: string, lineIndex: number) => void;
     toggleQa: (tabId: string, groupId: string) => void;
     completeGroup: (tabId: string, groupId: string) => void;
@@ -580,6 +591,87 @@ export const useStore = create<StoreState>()(
         g.updatedAt = Date.now();
       });
       get().persist();
+    },
+    promoteGroupToTask(tabId, groupId) {
+      const st = get();
+      const tab = st.tabs.find((x) => x.id === tabId);
+      const group = tab?.groups.find((x) => x.id === groupId);
+      if (!tab || !group) return null;
+      const coreGroup: CoreNoteGroup = {
+        id: group.id,
+        lines: [...group.lines],
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+        pinned: group.pinned,
+        tags: group.tags ? [...group.tags] : undefined,
+        history: group.history.map((revision) => ({
+          id: revision.id,
+          at: revision.at,
+          source: revision.source,
+          lines: [...revision.lines],
+          model: revision.model,
+          diffSummary: revision.diffSummary
+        })),
+        formattedHashes: [...group.formattedHashes],
+        autoFormatOptOut: group.autoFormatOptOut,
+        brainstormId: group.brainstormId,
+        category: group.category,
+        suggestedTabId: group.suggestedTabId,
+        renderAs: group.renderAs,
+        subStates: group.subStates
+      };
+      const coreTab: Pick<CoreTab, 'id' | 'name' | 'projectContext' | 'aliases'> = {
+        id: tab.id,
+        name: tab.name,
+        projectContext: tab.projectContext,
+        aliases: tab.aliases
+      };
+      const task = promoteNoteGroupToTaskCard({
+        group: coreGroup,
+        tab: coreTab,
+        id: `task_${groupId}_${nanoid(6)}`,
+        projectId: tab.projectContext ?? st.integrations.agentRunner.defaultProjectId,
+        now: Date.now()
+      });
+      set((s) => {
+        const existingIndex = s.tasks.findIndex((entry) => entry.id === task.id);
+        if (existingIndex >= 0) s.tasks[existingIndex] = task;
+        else s.tasks.unshift(task);
+      });
+      get().persist();
+      void window.braindump?.sync?.enqueue('upsertTaskCard', { task });
+      return task.id;
+    },
+    buildTaskSendReview(taskId) {
+      const task = get().tasks.find((entry) => entry.id === taskId);
+      return task ? buildSendToNeoReview(task) : null;
+    },
+    sendTaskToNeo(taskId) {
+      const task = get().tasks.find((entry) => entry.id === taskId);
+      if (!task) return null;
+      const review = buildSendToNeoReview(task);
+      const eventId = `send_${nanoid(8)}:task.requested`;
+      const event: TaskOutboxEvent = {
+        id: eventId,
+        kind: 'task.requested',
+        taskId,
+        status: task.status,
+        at: Date.now()
+      };
+      set((s) => {
+        const target = s.tasks.find((entry) => entry.id === taskId);
+        if (!target) return;
+        target.sync = {
+          ...target.sync,
+          state: 'queued',
+          outboxEventIds: Array.from(new Set([...(target.sync.outboxEventIds ?? []), eventId]))
+        };
+        target.updatedAt = event.at;
+        s.taskOutbox.push(event);
+      });
+      get().persist();
+      void window.braindump?.sync?.enqueue('requestTaskSend', { taskId, reviewConfirmed: true });
+      return review;
     },
     toggleSubState(tabId, groupId, lineIndex) {
       set((s) => {

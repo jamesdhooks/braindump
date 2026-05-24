@@ -87,6 +87,10 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
   const moveGroup = useStore((s) => s.moveGroup);
   const setCategory = useStore((s) => s.setCategory);
   const showToast = useStore((s) => s.showToast);
+  const promoteGroupToTask = useStore((s) => s.promoteGroupToTask);
+  const buildTaskSendReview = useStore((s) => s.buildTaskSendReview);
+  const sendTaskToNeo = useStore((s) => s.sendTaskToNeo);
+  const tasks = useStore((s) => s.tasks);
   const category = group.category ? categories.find((c) => c.id === group.category) : null;
   const projectPath = tabs.find((t) => t.id === tabId)?.projectPath;
   const currentTab = tabs.find((t) => t.id === tabId);
@@ -151,6 +155,11 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
   const ref = useRef<HTMLDivElement>(null);
 
   const isFocused = focusedId === group.id;
+  const existingTask = useMemo(
+    () => tasks.find((task) => task.source?.kind === 'note-group' && task.source.tabId === tabId && task.source.groupId === group.id) ?? null,
+    [group.id, tabId, tasks]
+  );
+  const isTaskQueuedForNeo = existingTask?.sync.state === 'queued';
   const isTaskMode = isTaskRenderMode(group.renderAs);
   const isQaPassed = Boolean(group.completedAt && group.qaAt);
   const visibleLines = isQaPassed && !editing ? group.lines.slice(0, 3) : group.lines;
@@ -396,6 +405,51 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
       addGroupLines(tasksTab.id, normalizedTasks, false, 'user');
       showToast({ message: `Extracted ${normalizedTasks.length} task${normalizedTasks.length === 1 ? '' : 's'}`, kind: 'success' });
     }
+  }
+
+  function promoteToTaskCard() {
+    if (existingTask) {
+      showToast({ message: 'This dump is already a TaskCard', kind: 'info' });
+      return;
+    }
+    const taskId = promoteGroupToTask(tabId, group.id);
+    if (!taskId) {
+      showToast({ message: 'Could not promote this dump to a task', kind: 'error' });
+      return;
+    }
+    showToast({ message: 'Promoted to TaskCard — review before sending to Neo', kind: 'success' });
+  }
+
+  function reviewAndSendToNeo() {
+    const taskId = existingTask?.id ?? promoteGroupToTask(tabId, group.id);
+    if (!taskId) {
+      showToast({ message: 'Could not prepare task for Neo', kind: 'error' });
+      return;
+    }
+    const review = buildTaskSendReview(taskId);
+    if (!review) {
+      showToast({ message: 'Could not build Send to Neo review', kind: 'error' });
+      return;
+    }
+    const confirmed = window.confirm(
+      [
+        'Send this TaskCard to Neo?',
+        '',
+        `Project: ${review.projectId}`,
+        `Title: ${review.title}`,
+        review.description ? `Description: ${review.description}` : null,
+        review.tags.length ? `Tags: ${review.tags.join(', ')}` : null,
+        '',
+        'This queues a task.requested outbox event.'
+      ].filter(Boolean).join('\n')
+    );
+    if (!confirmed) return;
+    const sentReview = sendTaskToNeo(taskId);
+    if (!sentReview) {
+      showToast({ message: 'Could not queue Send to Neo request', kind: 'error' });
+      return;
+    }
+    showToast({ message: 'Queued for Neo via TaskCard outbox', kind: 'success' });
   }
 
   async function copyToClipboard() {
@@ -1083,6 +1137,22 @@ export function NoteGroup({ tabId, group }: { tabId: string; group: NoteGroupT }
           compact
         >
           <ListTodo size={14} />
+        </TrayButton>
+        <TrayButton
+          title={existingTask ? 'Already promoted to TaskCard' : 'Promote this dump to a local TaskCard'}
+          onClick={promoteToTaskCard}
+          active={Boolean(existingTask)}
+          compact
+        >
+          <ListTodo size={14} />
+        </TrayButton>
+        <TrayButton
+          title={isTaskQueuedForNeo ? 'TaskCard queued for Neo' : 'Review and Send to Neo'}
+          onClick={reviewAndSendToNeo}
+          active={isTaskQueuedForNeo}
+          compact
+        >
+          <Send size={14} />
         </TrayButton>
         {group.brainstormId && (
           <TrayButton title="Jump to brainstorm" onClick={() => setBrainstormOpen(true)} compact>

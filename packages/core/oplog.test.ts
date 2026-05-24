@@ -29,15 +29,30 @@ function op(kind: Op['kind'], payload: Record<string, unknown>, at = 1000): Op {
 }
 
 describe('task op-log support', () => {
-  it('adds a task card and queues its request event for later sync', () => {
+  it('adds a task card locally without sending it to Neo implicitly', () => {
     const state = applyOp(baseState, op('upsertTaskCard', { task }));
 
     expect(state.tasks!).toHaveLength(1);
     expect(state.tasks![0].title).toBe('Add compact weather card');
-    expect(state.taskOutbox!).toEqual([
-      expect.objectContaining({ kind: 'task.requested', taskId: 'task_1', status: 'todo' })
-    ]);
+    expect(state.tasks![0].sync.state).toBe('local');
+    expect(state.taskOutbox!).toEqual([]);
+  });
+
+  it('queues task.requested only when James explicitly sends the task to Neo', () => {
+    const withTask = applyOp(baseState, op('upsertTaskCard', { task }, 1000));
+    const state = applyOp(withTask, op('requestTaskSend', { taskId: 'task_1', reviewConfirmed: true }, 2000));
+
     expect(state.tasks![0].sync.state).toBe('queued');
+    expect(state.tasks![0].sync.outboxEventIds).toEqual(['requestTaskSend_2000:task.requested']);
+    expect(state.taskOutbox!).toEqual([
+      {
+        id: 'requestTaskSend_2000:task.requested',
+        kind: 'task.requested',
+        taskId: 'task_1',
+        status: 'todo',
+        at: 2000
+      }
+    ]);
   });
 
   it('updates task status and records a status-changed outbox event', () => {
@@ -47,8 +62,8 @@ describe('task op-log support', () => {
     ]);
 
     expect(state.tasks![0]).toMatchObject({ status: 'qa_required', updatedAt: 2000 });
-    expect(state.taskOutbox!.map((event) => event.kind)).toEqual(['task.requested', 'task.status_changed']);
-    expect(state.taskOutbox![1]).toMatchObject({ taskId: 'task_1', status: 'qa_required', note: 'Preview ready' });
+    expect(state.taskOutbox!.map((event) => event.kind)).toEqual(['task.status_changed']);
+    expect(state.taskOutbox![0]).toMatchObject({ taskId: 'task_1', status: 'qa_required', note: 'Preview ready' });
   });
 
   it('applies runner sync metadata without creating a new outbound event', () => {
@@ -74,6 +89,6 @@ describe('task op-log support', () => {
     expect(state.tasks![0].sync).toMatchObject({ state: 'synced', runnerTaskId: '128', monitorTaskId: 'mon_128' });
     expect(state.tasks![0].runnerTaskId).toBe('128');
     expect(state.tasks![0].monitorTaskId).toBe('mon_128');
-    expect(state.taskOutbox!).toHaveLength(1);
+    expect(state.taskOutbox!).toHaveLength(0);
   });
 });
