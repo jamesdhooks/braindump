@@ -59,6 +59,7 @@ export const DEFAULT_STATE: PersistedStore = {
   autoFormat: DEFAULT_AUTO_FORMAT,
   ui: {
     theme: 'dark',
+    accentColor: '#7c8cff',
     focus: false,
     archiveOpen: false,
     brainstormOpen: false,
@@ -78,6 +79,7 @@ export const DEFAULT_STATE: PersistedStore = {
     { id: 'code-feature', label: 'Code feature', color: '#9effc7' },
     { id: 'household-todo', label: 'Household todo', color: '#ffd38a' }
   ],
+  skills: [],
   claw: {
     defaultBackend: 'claude-code',
     autoSendCategories: [],
@@ -86,6 +88,24 @@ export const DEFAULT_STATE: PersistedStore = {
     allowRm: false
   },
   clawJobs: [],
+  runners: {
+    claudeCli: {
+      enabled: false,
+      model: {
+        simple: 'claude-haiku-4-5-20251001',
+        complex: 'claude-sonnet-4-6',
+        crazy: 'claude-opus-4-7'
+      }
+    },
+    copilotCli: {
+      enabled: false,
+      model: {
+        simple: 'gpt-4o-mini',
+        complex: 'gpt-4.1',
+        crazy: 'o3'
+      }
+    }
+  },
   usage: {
     perDay: {}
   }

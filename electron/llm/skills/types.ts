@@ -42,4 +42,5 @@ export type RunSkillResult<TOut> = {
   inputTokens: number;
   outputTokens: number;
   latencyMs: number;
+  messages?: LLMMessage[];
 };

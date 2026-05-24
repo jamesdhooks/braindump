@@ -76,8 +76,9 @@
       "output": "release"
     },
     "asar": true,
-    "compression": "maximum",
+    "compression": "normal",
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",

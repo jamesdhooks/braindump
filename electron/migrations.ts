@@ -1,6 +1,6 @@
 import type { PersistedStore } from '../src/types';
 
-export const CURRENT_VERSION = 2;
+export const CURRENT_VERSION = 5;
 
 type Migration = (s: Record<string, unknown>) => Record<string, unknown>;
 
@@ -26,6 +26,63 @@ const MIGRATIONS: Record<number, Migration> = {
       ];
     }
     return { ...s, version: 2 };
+  },
+  // 2 -> 3: migrate deprecated `gh copilot` binary overrides to standalone `copilot` CLI
+  2: (s) => {
+    const runners = (s.runners as Record<string, unknown> | undefined) ?? {};
+    const copilotCli = (runners.copilotCli as Record<string, unknown> | undefined) ?? {};
+    const binaryPath = copilotCli.binaryPath;
+    if (typeof binaryPath === 'string') {
+      const normalized = binaryPath.replace(/\\/g, '/').toLowerCase();
+      if (normalized.endsWith('/gh') || normalized.endsWith('/gh.exe') || normalized.endsWith('/gh.cmd')) {
+        delete copilotCli.binaryPath;
+      }
+    }
+    runners.copilotCli = copilotCli;
+    s.runners = runners;
+    return { ...s, version: 3 };
+  },
+  // 3 -> 4: ensure Claude runner has explicit per-complexity model mappings
+  3: (s) => {
+    const runners = (s.runners as Record<string, unknown> | undefined) ?? {};
+    const claudeCli = (runners.claudeCli as Record<string, unknown> | undefined) ?? {};
+    const model = (claudeCli.model as Record<string, unknown> | undefined) ?? {};
+    const copilotCli = (runners.copilotCli as Record<string, unknown> | undefined) ?? {};
+    const copilotModel = (copilotCli.model as Record<string, unknown> | undefined) ?? {};
+
+    if (typeof model.simple !== 'string' || !model.simple.trim()) {
+      model.simple = 'claude-haiku-4-5-20251001';
+    }
+    if (typeof model.complex !== 'string' || !model.complex.trim()) {
+      model.complex = 'claude-sonnet-4-6';
+    }
+    if (typeof model.crazy !== 'string' || !model.crazy.trim()) {
+      model.crazy = 'claude-opus-4-7';
+    }
+
+    claudeCli.model = model;
+    if (typeof copilotModel.simple !== 'string' || !copilotModel.simple.trim()) {
+      copilotModel.simple = 'gpt-4o-mini';
+    }
+    if (typeof copilotModel.complex !== 'string' || !copilotModel.complex.trim()) {
+      copilotModel.complex = 'gpt-4.1';
+    }
+    if (typeof copilotModel.crazy !== 'string' || !copilotModel.crazy.trim()) {
+      copilotModel.crazy = 'o3';
+    }
+
+    copilotCli.model = copilotModel;
+    runners.claudeCli = claudeCli;
+    runners.copilotCli = copilotCli;
+    s.runners = runners;
+    return { ...s, version: 4 };
+  },
+  // 4 -> 5: add persisted execution skills collection
+  4: (s) => {
+    if (!Array.isArray(s.skills)) {
+      s.skills = [];
+    }
+    return { ...s, version: 5 };
   }
 };
 

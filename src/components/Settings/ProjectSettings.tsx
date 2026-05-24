@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Save } from 'lucide-react';
+import { Sparkles, Save, FolderOpen } from 'lucide-react';
 import { useStore } from '../../store';
 
 export function ProjectSettings() {
   const tabs = useStore((s) => s.tabs);
   const setProjectContext = useStore((s) => s.setProjectContext);
+  const showToast = useStore((s) => s.showToast);
   const providers = useStore((s) => s.providers);
   const active = useStore((s) => s.activeProviderId);
 
@@ -12,12 +13,14 @@ export function ProjectSettings() {
   const selected = useMemo(() => tabs.find((t) => t.id === selectedId) ?? null, [tabs, selectedId]);
 
   const [text, setText] = useState(selected?.projectContext ?? '');
+  const [projectPath, setProjectPath] = useState(selected?.projectPath ?? '');
   const [aliases, setAliases] = useState((selected?.aliases ?? []).join(', '));
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setText(selected?.projectContext ?? '');
+    setProjectPath(selected?.projectPath ?? '');
     setAliases((selected?.aliases ?? []).join(', '));
     setDirty(false);
   }, [selectedId, selected]);
@@ -47,8 +50,9 @@ export function ProjectSettings() {
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean);
-    setProjectContext(selected.id, text.trim(), alArr);
+    setProjectContext(selected.id, text.trim(), alArr, projectPath.trim());
     setDirty(false);
+    showToast({ message: `Saved project context for ${selected.name}`, kind: 'success' });
   }
 
   const hasProvider = providers.find((p) => p.id === active);
@@ -82,6 +86,37 @@ export function ProjectSettings() {
           placeholder="What is this project about? Audience, scope, constraints — whatever would help the assistant understand it without re-reading everything."
           className="w-full bg-surface-2 border border-hairline focus:border-accent-500 rounded px-3 py-2 text-fg-0 placeholder:text-fg-3 outline-none"
         />
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-[11px] uppercase tracking-wider text-fg-3">Project folder (used as cwd for Claw / Claude / Copilot)</label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={projectPath}
+            onChange={(e) => {
+              setProjectPath(e.target.value);
+              setDirty(true);
+            }}
+            placeholder="e.g. F:/MyFiles/Projects/Web/braindump"
+            className="w-full bg-surface-2 border border-hairline focus:border-accent-500 rounded px-3 py-2 text-fg-0 placeholder:text-fg-3 outline-none"
+          />
+          <button
+            onClick={() =>
+              void window.braindump.app.openFolderDialog().then((p) => {
+                if (p) {
+                  setProjectPath(p);
+                  setDirty(true);
+                }
+              })
+            }
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-surface-3 hover:bg-surface-4 text-fg-0 text-sm"
+            title="Browse for folder"
+          >
+            <FolderOpen size={14} />
+            Browse
+          </button>
+        </div>
       </div>
 
       <div className="space-y-2">

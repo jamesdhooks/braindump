@@ -12,6 +12,7 @@ export function LLMSettings() {
   const updateProvider = useStore((s) => s.updateProvider);
   const overrides = useStore((s) => s.featureProviderOverrides);
   const setFeatureOverride = useStore((s) => s.setFeatureOverride);
+  const showToast = useStore((s) => s.showToast);
 
   const [selectedId, setSelectedId] = useState<LLMProviderId>(activeProviderId);
   const provider = providers.find((p) => p.id === selectedId) ?? providers[0];
@@ -42,12 +43,14 @@ export function LLMSettings() {
     await window.braindump.secrets.setKey(keyName, apiKey);
     setKeyPresent(Boolean(apiKey));
     setApiKey('');
+    showToast({ message: `${provider.label} API key saved`, kind: 'success' });
   }
 
   async function clearKey() {
     const keyName = await window.braindump.llm.providerSecretKeyName(selectedId);
     await window.braindump.secrets.setKey(keyName, '');
     setKeyPresent(false);
+    showToast({ message: `${provider.label} API key cleared`, kind: 'info' });
   }
 
   async function testConnection() {

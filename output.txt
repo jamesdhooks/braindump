@@ -1,0 +1,4 @@
+
+> braindump@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit
+

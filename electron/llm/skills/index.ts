@@ -6,6 +6,8 @@ import { runCategorize } from './categorize';
 import { runProjectContext } from './projectContext';
 import { runDailyReport, runStalePulse } from './reports';
 import { runTemplate } from './template';
+import { runCombineGroups } from './combineGroups';
+import { runGenerateAppSkill } from './appSkill';
 
 export const skills = {
   format: runFormat,
@@ -18,8 +20,24 @@ export const skills = {
   projectContext: runProjectContext,
   dailyReport: runDailyReport,
   stalePulse: runStalePulse,
-  template: runTemplate
+  template: runTemplate,
+  combineGroups: runCombineGroups,
+  generateAppSkill: runGenerateAppSkill
 };
 
 export type SkillName = keyof typeof skills;
-export { runFormat, runRamble, runCapture, runTag, runTasks, runExplainBack, runCategorize, runProjectContext, runDailyReport, runStalePulse, runTemplate };
+export {
+  runFormat,
+  runRamble,
+  runCapture,
+  runTag,
+  runTasks,
+  runExplainBack,
+  runCategorize,
+  runProjectContext,
+  runDailyReport,
+  runStalePulse,
+  runTemplate,
+  runCombineGroups,
+  runGenerateAppSkill
+};

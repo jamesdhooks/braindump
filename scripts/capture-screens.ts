@@ -31,7 +31,7 @@ async function main() {
     process.exit(1);
   }
   const browser = await pw.chromium.launch();
-  const base = process.env.BRAINDUMP_SCREENS_URL ?? 'http://localhost:5173';
+  const base = process.env.BRAINDUMP_SCREENS_URL ?? 'http://localhost:9173';
   for (const s of SHOTS) {
     const ctx = await browser.newContext({ viewport: s.viewport });
     const page = await ctx.newPage();

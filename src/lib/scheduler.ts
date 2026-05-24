@@ -8,6 +8,33 @@ export function todayKey(d: Date = new Date()): string {
   return d.toISOString().slice(0, 10);
 }
 
+function isDateKey(value: string | null | undefined): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function latestPersistedDigestDate(): string | null {
+  const digests = useStore.getState().digests ?? [];
+  let latest: string | null = null;
+  for (const digest of digests) {
+    if (!isDateKey(digest.date)) continue;
+    if (!latest || digest.date > latest) latest = digest.date;
+  }
+  return latest;
+}
+
+/** Returns an array of YYYY-MM-DD strings from the day after `from` up to and including `to`. */
+function daysBetween(from: string, to: string): string[] {
+  const days: string[] = [];
+  const cur = new Date(from + 'T00:00:00');
+  const end = new Date(to + 'T00:00:00');
+  cur.setDate(cur.getDate() + 1);
+  while (cur <= end) {
+    days.push(cur.toISOString().slice(0, 10));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+}
+
 export function scheduleNext(hour: number, cb: () => void): () => void {
   function ms(): number {
     const now = new Date();
@@ -23,58 +50,186 @@ export function scheduleNext(hour: number, cb: () => void): () => void {
   return () => window.clearTimeout(t);
 }
 
-export async function runDailyReportIfDue(force = false): Promise<DailyDigest | null> {
+/** Archive groups that were completed on a given day, returning the archived items. */
+function archiveCompletedForDay(dateKey: string): {
+  tabId: string;
+  lines: string[];
+  completedAt: number;
+  qaAt?: number | null;
+  archived: true;
+}[] {
+  const dayStart = new Date(dateKey + 'T00:00:00').getTime();
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
   const st = useStore.getState();
-  if (!st.ui.dailyDigestEnabled && !force) return null;
-  const key = todayKey();
-  const last = localStorage.getItem(LS_LAST_REPORT);
-  if (last === key && !force) return null;
+  const completed: {
+    tabId: string;
+    lines: string[];
+    completedAt: number;
+    qaAt?: number | null;
+    archived: true;
+  }[] = [];
 
-  const nowMs = Date.now();
-  const since = nowMs - 24 * 60 * 60 * 1000;
+  useStore.setState((s) => {
+    for (const tab of s.tabs) {
+      const toRemove: string[] = [];
+      for (const g of tab.groups) {
+        if (g.completedAt && g.completedAt >= dayStart && g.completedAt < dayEnd) {
+          // Phase 5: code-feature dumps require explicit QA before being archived.
+          if (g.category === 'code-feature' && !g.qaAt) continue;
+          completed.push({ tabId: tab.id, lines: g.lines, completedAt: g.completedAt, qaAt: g.qaAt ?? null, archived: true });
+          s.archive.unshift({ group: g, tabId: tab.id, completedAt: g.completedAt });
+          toRemove.push(g.id);
+        }
+      }
+      tab.groups = tab.groups.filter((g) => !toRemove.includes(g.id));
+    }
+  });
 
-  const completed = st.archive
-    .filter((a) => a.completedAt >= since)
-    .map((a) => ({ tabId: a.tabId, lines: a.group.lines, completedAt: a.completedAt }));
-  const created = st.tabs.flatMap((t) =>
-    t.groups.filter((g) => g.createdAt >= since).map((g) => ({ tabId: t.id, lines: g.lines }))
+  if (completed.length) st.persist();
+  return completed;
+}
+
+async function runReportForDay(dateKey: string, force: boolean): Promise<DailyDigest | null> {
+  const st = useStore.getState();
+  const dayStart = new Date(dateKey + 'T00:00:00').getTime();
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+
+  // Snapshot completed groups before archival mutation so we can report non-archived completions too.
+  const completedInTabs = st.tabs.flatMap((t) =>
+    t.groups
+      .filter((g) => g.completedAt && g.completedAt >= dayStart && g.completedAt < dayEnd)
+      .map((g) => ({
+        tabId: t.id,
+        lines: g.lines,
+        completedAt: g.completedAt as number,
+        qaAt: g.qaAt ?? null,
+        archived: false
+      }))
   );
+
+  // Archive groups completed on this day and get them for the report
+  const completed = archiveCompletedForDay(dateKey);
+
+  // Also include items already in archive that were completed on this day (from prior sessions)
+  const archiveCompleted = st.archive
+    .filter((a) => a.completedAt >= dayStart && a.completedAt < dayEnd)
+    .map((a) => ({
+      tabId: a.tabId,
+      lines: a.group.lines,
+      completedAt: a.completedAt,
+      qaAt: a.group.qaAt ?? null,
+      archived: true
+    }));
+
+  // Merge completions by identity while preserving archived/qa signals.
+  const completionByKey = new Map<
+    string,
+    { tabId: string; lines: string[]; completedAt: number; qaAt?: number | null; archived: boolean }
+  >();
+  for (const c of completedInTabs) {
+    const key = `${c.completedAt}:${c.tabId}:${c.lines[0] ?? ''}`;
+    completionByKey.set(key, c);
+  }
+  for (const c of [...completed, ...archiveCompleted]) {
+    const key = `${c.completedAt}:${c.tabId}:${c.lines[0] ?? ''}`;
+    const prev = completionByKey.get(key);
+    completionByKey.set(key, {
+      ...c,
+      qaAt: c.qaAt ?? prev?.qaAt ?? null,
+      archived: c.archived || prev?.archived || false
+    });
+  }
+  const allCompleted = Array.from(completionByKey.values());
+
+  const createdInTabs = st.tabs.flatMap((t) =>
+    t.groups
+      .filter((g) => g.createdAt >= dayStart && g.createdAt < dayEnd)
+      .map((g) => ({ tabId: t.id, lines: g.lines }))
+  );
+  const createdInArchive = st.archive
+    .filter((a) => a.group.createdAt >= dayStart && a.group.createdAt < dayEnd)
+    .map((a) => ({ tabId: a.tabId, lines: a.group.lines }));
+  const created = [...createdInTabs];
+  for (const c of createdInArchive) {
+    if (!created.some((x) => x.tabId === c.tabId && x.lines[0] === c.lines[0])) created.push(c);
+  }
+
+  const qaCompleted = allCompleted.filter((c) => Boolean(c.qaAt));
+  const archivedCompleted = allCompleted.filter((c) => c.archived);
   const stillPinned = st.tabs.flatMap((t) =>
     t.groups.filter((g) => g.pinned).map((g) => ({ tabId: t.id, lines: g.lines, updatedAt: g.updatedAt }))
   );
-  const activity = completed.length + created.length;
+  const activity = allCompleted.length + created.length;
 
   if (activity < 3 && !force) {
     const quiet: DailyDigest = {
-      date: key,
+      date: dateKey,
       headline: 'Quiet day.',
       byTab: [],
       carryForward: [],
       stale: stillPinned.slice(0, 3).map((p) => p.lines[0] ?? '')
     };
     st.appendDigest(quiet);
-    localStorage.setItem(LS_LAST_REPORT, key);
     return quiet;
   }
 
   try {
     const res = await window.braindump.skill.dailyReport({
-      date: key,
+      date: dateKey,
       tabs: st.tabs.map((t) => ({ id: t.id, name: t.name, projectContext: t.projectContext })),
-      completed,
+      completed: allCompleted,
       created,
-      stillPinned
+      stillPinned,
+      stats: {
+        createdCount: created.length,
+        completedCount: allCompleted.length,
+        qaCount: qaCompleted.length,
+        archivedCount: archivedCompleted.length
+      }
     });
     const value = res.ok ? (res.value as DailyDigest | null) : null;
     const digest: DailyDigest = value
-      ? { ...value, date: key }
-      : { date: key, headline: 'A full day.', byTab: [], carryForward: [], stale: [] };
+      ? { ...value, date: dateKey }
+      : { date: dateKey, headline: 'A full day.', byTab: [], carryForward: [], stale: [] };
     st.appendDigest(digest);
-    localStorage.setItem(LS_LAST_REPORT, key);
     return digest;
   } catch {
     return null;
   }
+}
+
+export async function runDailyReportIfDue(force = false): Promise<DailyDigest | null> {
+  const st = useStore.getState();
+  if (!st.ui.dailyDigestEnabled && !force) return null;
+
+  const today = todayKey();
+  const last = latestPersistedDigestDate();
+  if (last) localStorage.setItem(LS_LAST_REPORT, last);
+
+  // Determine which days need reports
+  const missedDays = last ? daysBetween(last, today) : [today];
+
+  if (missedDays.length === 0 && !force) return null;
+  if (missedDays.length === 0 && force) {
+    // Force re-run today
+    const digest = await runReportForDay(today, true);
+    localStorage.setItem(LS_LAST_REPORT, today);
+    return digest;
+  }
+
+  let lastDigest: DailyDigest | null = null;
+  for (const day of missedDays) {
+    lastDigest = await runReportForDay(day, force && day === today);
+    localStorage.setItem(LS_LAST_REPORT, day);
+  }
+  return lastDigest;
+}
+
+export async function runDailyReportForDate(dateKey: string, force = true): Promise<DailyDigest | null> {
+  if (!isDateKey(dateKey)) return null;
+  const digest = await runReportForDay(dateKey, force);
+  localStorage.setItem(LS_LAST_REPORT, dateKey);
+  return digest;
 }
 
 export async function runStalePulse(force = false): Promise<void> {

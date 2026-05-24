@@ -140,6 +140,43 @@ export function AutoFormatSettings() {
         </div>
       </Field>
 
+      <Field label="Output style">
+        <div className="flex gap-2">
+          {(['plain', 'markdown'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => set({ formatStyle: s })}
+              className={
+                'px-3 py-1.5 rounded-md text-sm capitalize ' +
+                ((cfg.formatStyle ?? 'plain') === s
+                  ? 'bg-accent-500/20 text-accent-300 border border-accent-500/40'
+                  : 'bg-ink-850 border border-ink-750 text-ink-300 hover:border-ink-700')
+              }
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <div className="text-[11px] text-ink-500 mt-2">
+          {(cfg.formatStyle ?? 'plain') === 'markdown'
+            ? 'Multi-idea dumps get headers, lists, bold, and code blocks. Single-idea dumps stay plain.'
+            : 'Lines stay short and atomic. No headers or bullets unless the user wrote them.'}
+        </div>
+      </Field>
+
+      <Field label="Additional formatting guidance (optional)">
+        <textarea
+          value={cfg.guidance ?? ''}
+          onChange={(e) => set({ guidance: e.target.value })}
+          rows={3}
+          placeholder={'Examples:\n- Use bullets for any list of three or more items\n- Bold key decisions and TODOs\n- Group code-related lines into a fenced block'}
+          className="w-full bg-ink-800 border border-ink-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-accent-500"
+        />
+        <div className="text-[11px] text-ink-500 mt-1">
+          Sent to the model as a soft preference. Hard rules (no inventing facts, etc.) always win.
+        </div>
+      </Field>
+
       <div>
         <button
           onClick={() => window.braindump.autoFormat.tick()}

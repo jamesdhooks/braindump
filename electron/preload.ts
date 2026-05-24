@@ -69,6 +69,7 @@ const api = {
     return () => { ipcRenderer.removeListener('window:maximized-change', l); };
   },
   hideQuickCapture: () => ipcRenderer.invoke('window:hide-quick'),
+  openDevTools: () => ipcRenderer.invoke('window:open-devtools'),
 
   onOpenSettings: (cb: () => void): (() => void) => {
     const l = () => cb();
@@ -161,13 +162,16 @@ const api = {
       ipcRenderer.invoke('llm:vision', args) as Promise<string>,
     listModels: (providerId: string) => ipcRenderer.invoke('llm:list-models', { providerId }) as Promise<string[]>,
     testConnection: (providerId: string) => ipcRenderer.invoke('llm:test-connection', { providerId }) as Promise<{ ok: boolean; latencyMs: number; text: string; model: string; inputTokens: number; outputTokens: number }>,
-    providerSecretKeyName: (providerId: string) => ipcRenderer.invoke('llm:provider-secret-keyname', { providerId }) as Promise<string>
+    providerSecretKeyName: (providerId: string) => ipcRenderer.invoke('llm:provider-secret-keyname', { providerId }) as Promise<string>,
+    readSkillLog: (feature?: string, limit?: number) => ipcRenderer.invoke('llm:skill-log', { feature, limit }) as Promise<Record<string, unknown>[]>
   },
 
   autoFormat: {
     toggle: (enabled?: boolean) => ipcRenderer.invoke('autoformat:toggle', enabled) as Promise<boolean>,
     status: () => ipcRenderer.invoke('autoformat:status') as Promise<AutoFormatStatus>,
     tick: () => ipcRenderer.invoke('autoformat:tick'),
+    formatGroup: (tabId: string, groupId: string) =>
+      ipcRenderer.invoke('autoformat:format-group', { tabId, groupId }) as Promise<boolean>,
     onStatus: (cb: (s: AutoFormatStatus) => void): (() => void) => {
       const l = (_e: unknown, s: AutoFormatStatus) => cb(s);
       ipcRenderer.on('autoformat:status', l);
@@ -203,7 +207,30 @@ const api = {
     setLoginItem: (open: boolean) => ipcRenderer.invoke('app:set-login-item', { open }),
     getLoginItem: () => ipcRenderer.invoke('app:get-login-item') as Promise<boolean>,
     openFileDialog: () => ipcRenderer.invoke('dialog:open-file') as Promise<string | null>,
-    openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url)
+    openFolderDialog: () => ipcRenderer.invoke('dialog:open-folder') as Promise<string | null>,
+    openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
+    openLlmLog: () => ipcRenderer.invoke('app:open-llm-log') as Promise<string>
+  },
+
+  appSkills: {
+    generate: (args: { request: string; tabId?: string }) =>
+      ipcRenderer.invoke('app-skills:generate', args) as Promise<
+        | {
+            ok: true;
+            skill: import('../src/types').AppSkill;
+            model: string;
+            latencyMs: number;
+            raw: string;
+          }
+        | { ok: false; error: string }
+      >,
+    run: (args: {
+      skillId: string;
+      tabId: string;
+      sessionId?: string;
+      groupId?: string;
+      skill?: import('../src/types').AppSkill;
+    }) => ipcRenderer.invoke('app-skills:run', args) as Promise<import('./appSkills').AppSkillRunResponse>
   },
 
   skill: {
@@ -223,7 +250,9 @@ const api = {
       ipcRenderer.invoke('skill:project-context', args) as Promise<SkillResult<{ summary: string; aliases?: string[] }>>,
     dailyReport: (args: unknown) => ipcRenderer.invoke('skill:daily-report', args) as Promise<SkillResult<unknown>>,
     stalePulse: (args: unknown) => ipcRenderer.invoke('skill:stale-pulse', args) as Promise<SkillResult<unknown>>,
-    template: (id: 'meeting' | 'decision' | 'postmortem') => ipcRenderer.invoke('skill:template', { id }) as Promise<SkillResult<{ lines: string[] }>>
+    template: (id: 'meeting' | 'decision' | 'postmortem') => ipcRenderer.invoke('skill:template', { id }) as Promise<SkillResult<{ lines: string[] }>>,
+    combineGroups: (args: { groups: { lines: string[] }[]; projectContext?: string; mode?: 'faithful' | 'rewrite' }) =>
+      ipcRenderer.invoke('skill:combine-groups', args) as Promise<SkillResult<{ combined_lines: string[]; notes?: string }>>
   },
 
   claw: {
@@ -231,8 +260,27 @@ const api = {
     stop: () => ipcRenderer.invoke('claw:stop') as Promise<ClawBrokerState>,
     restart: () => ipcRenderer.invoke('claw:restart') as Promise<ClawBrokerState>,
     state: () => ipcRenderer.invoke('claw:state') as Promise<ClawBrokerState>,
-    startSession: (args: { sessionId?: string; backend: string; cwd: string; skills: string[]; system?: string }) =>
+    startSession: (args: { sessionId?: string; tabId?: string; groupId?: string; backend: string; cwd: string; skills: string[]; system?: string }) =>
       ipcRenderer.invoke('claw:start-session', args) as Promise<{ sessionId: string }>,
+    recoverSessions: () =>
+      ipcRenderer.invoke('claw:recover-sessions') as Promise<Array<{
+        sessionId: string;
+        tabId?: string;
+        groupId?: string;
+        backend: string;
+        cwd: string;
+        skills: string[];
+        system?: string;
+        prompt?: string;
+        startedAt: number;
+        endedAt?: number;
+        state: 'running' | 'waiting-input' | 'done' | 'error';
+        summary?: string;
+        metrics?: { durationMs: number; tokensIn: number; tokensOut: number; files: number; diffs: number };
+        events: import('../src/types').ClawJobEvent[];
+        artifacts: import('../src/types').ClawJobArtifact[];
+        pendingPrompts: { promptId: string; question: string; options?: string[] }[];
+      }>>,
     message: (sessionId: string, content: string) => ipcRenderer.invoke('claw:message', { sessionId, content }),
     reply: (sessionId: string, promptId: string, text: string) => ipcRenderer.invoke('claw:reply', { sessionId, promptId, text }),
     interrupt: (sessionId: string) => ipcRenderer.invoke('claw:interrupt', { sessionId }),
@@ -265,6 +313,49 @@ const api = {
       remove: (name: string) =>
         ipcRenderer.invoke('claw-skills:delete', { name }) as Promise<{ name: string; path: string; content: string; id: string; scope: string }[]>,
       openFolder: () => ipcRenderer.invoke('claw-skills:open-folder') as Promise<string>
+    }
+  },
+
+  runner: {
+    list: () => ipcRenderer.invoke('runner:list') as Promise<{ id: 'claude-cli' | 'copilot-cli'; enabled: boolean; available: boolean; binary?: string; version?: string; error?: string }[]>,
+    run: (args: {
+      runnerId: 'claude-cli' | 'copilot-cli';
+      tabId: string;
+      groupId: string;
+      prompt: string;
+      cwd?: string;
+      complexity?: 'simple' | 'complex' | 'crazy';
+      complexitySource?: 'manual' | 'automatic';
+      system?: string;
+    }) =>
+      ipcRenderer.invoke('runner:run', args) as Promise<{ sessionId: string }>,
+    recoverSessions: () =>
+      ipcRenderer.invoke('runner:recover-sessions') as Promise<Array<{
+        sessionId: string;
+        runnerId: 'claude-cli' | 'copilot-cli';
+        tabId: string;
+        groupId: string;
+        binary: string;
+        args: string[];
+        prompt: string;
+        system?: string;
+        cwd: string;
+        complexity?: 'simple' | 'complex' | 'crazy';
+        complexitySource?: 'manual' | 'automatic';
+        startedAt: number;
+        endedAt?: number;
+        state: 'running' | 'waiting-input' | 'done' | 'error' | 'interrupted';
+        summary?: string;
+        events: import('../src/types').ClawJobEvent[];
+        artifacts: import('../src/types').ClawJobArtifact[];
+      }>>,
+    interrupt: (sessionId: string) => ipcRenderer.invoke('runner:interrupt', { sessionId }) as Promise<{ ok: boolean }>,
+    interruptAll: () => ipcRenderer.invoke('runner:interrupt-all'),
+    showLogs: (runnerId: 'claude-cli' | 'copilot-cli') => ipcRenderer.invoke('runner:show-logs', { runnerId }) as Promise<{ path: string }>,
+    onEvent: (cb: (ev: unknown) => void): (() => void) => {
+      const l = (_e: unknown, ev: unknown) => cb(ev);
+      ipcRenderer.on('runner:event', l);
+      return () => ipcRenderer.removeListener('runner:event', l);
     }
   },
 
@@ -309,6 +400,12 @@ const api = {
     }>,
     setFsync: (on: boolean) => ipcRenderer.invoke('persistence:set-fsync', { on }),
     openFolder: () => ipcRenderer.invoke('persistence:open-folder') as Promise<string>,
+    pickFolder: () => ipcRenderer.invoke('persistence:pick-folder') as Promise<{ canceled: boolean; path?: string }>,
+    setFolder: (path: string, force?: boolean) =>
+      ipcRenderer.invoke('persistence:set-folder', { path, force }) as Promise<
+        { ok: true; oldPath: string; newPath: string; copied: string[] } | { ok: false; error: string }
+      >,
+    resetFolder: () => ipcRenderer.invoke('persistence:reset-folder') as Promise<{ ok: boolean; dataFolder: string }>,
     exportAll: () => ipcRenderer.invoke('persistence:export') as Promise<{ canceled: boolean; path?: string }>,
     importAll: () => ipcRenderer.invoke('persistence:import') as Promise<{ canceled: boolean; ok?: boolean; error?: string }>,
     revertBackup: (index: number) => ipcRenderer.invoke('persistence:revert-backup', { index }) as Promise<{ ok: boolean }>,

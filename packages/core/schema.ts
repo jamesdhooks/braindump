@@ -20,6 +20,10 @@ export const RevisionSchema = z.object({
   diffSummary: z.string().optional()
 });
 
+const LineSubStateSchema = z.object({
+  completed: z.boolean().optional()
+});
+
 export const NoteGroupSchema = z.object({
   id: z.string(),
   lines: z.array(NoteLineSchema),
@@ -33,7 +37,9 @@ export const NoteGroupSchema = z.object({
   autoFormatOptOut: z.boolean().optional(),
   brainstormId: z.string().optional(),
   category: z.string().optional(),
-  suggestedTabId: z.string().optional()
+  suggestedTabId: z.string().optional(),
+  renderAs: z.enum(['tasks']).optional(),
+  subStates: z.record(LineSubStateSchema).optional()
 });
 
 export const TabSchema = z.object({
@@ -41,9 +47,11 @@ export const TabSchema = z.object({
   name: z.string(),
   color: z.string().optional(),
   order: z.number(),
+  lastPrioritySortAt: z.number().optional(),
   groups: z.array(NoteGroupSchema),
   autoFormatEnabled: z.boolean().optional(),
   projectContext: z.string().optional(),
+  projectPath: z.string().optional(),
   aliases: z.array(z.string()).optional()
 });
 

@@ -1,0 +1,14 @@
+
+> braindump@0.1.0 build:win
+> npm run build && electron-builder --win --x64
+
+
+> braindump@0.1.0 build
+> tsc -p tsconfig.json && vite build
+
+src/components/SkillsWorkspace.tsx(338,33): error TS2339: Property 'backend' does not exist on type 'AppSkillExecutor'.
+  Property 'backend' does not exist on type 'AppSkillRawExecutor'.
+src/components/SkillsWorkspace.tsx(347,33): error TS2339: Property 'skillId' does not exist on type 'AppSkillExecutor'.
+  Property 'skillId' does not exist on type 'AppSkillRawExecutor'.
+src/components/SkillsWorkspace.tsx(364,34): error TS2339: Property 'backend' does not exist on type 'AppSkillExecutor'.
+  Property 'backend' does not exist on type 'AppSkillRawExecutor'.

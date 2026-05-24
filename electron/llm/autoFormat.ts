@@ -132,6 +132,25 @@ export class AutoFormatter {
     }
   }
 
+  async formatGroup(tabId: string, groupId: string): Promise<boolean> {
+    if (this.running) return false;
+    const state = getState();
+    const provider = this.getProvider(state);
+    if (!provider) throw new Error('No LLM provider configured for formatting');
+    this.running = true;
+    this.status = { ...this.status, state: 'formatting', lastAction: `formating ${groupId.slice(0, 6)}` };
+    this.broadcast();
+    try {
+      await this.formatOne(provider, tabId, groupId);
+      this.recentRequests.push(Date.now());
+      return true;
+    } finally {
+      this.running = false;
+      this.status = { ...this.status, state: 'idle' };
+      this.broadcast();
+    }
+  }
+
   private async formatOne(provider: LLMProviderConfig, tabId: string, groupId: string): Promise<void> {
     const state = getState();
     const tab = state.tabs.find((t) => t.id === tabId);
@@ -143,7 +162,9 @@ export class AutoFormatter {
       lines: group.lines,
       aggressiveness: cfg.aggressiveness,
       preserveVoice: cfg.preserveVoice,
-      projectContext: tab.projectContext
+      projectContext: tab.projectContext,
+      formatStyle: cfg.formatStyle,
+      guidance: cfg.guidance
     });
 
     if (!result.ok || !result.value) {
@@ -169,7 +190,17 @@ export class AutoFormatter {
         source: 'auto-format',
         lines: [...g.lines],
         model: `${provider.id}/${provider.model}`,
-        diffSummary: parsed?.notes
+        diffSummary: parsed?.notes,
+        exchange: result.messages
+          ? {
+              messages: result.messages,
+              response: result.raw,
+              inputTokens: result.inputTokens,
+              outputTokens: result.outputTokens,
+              latencyMs: result.latencyMs,
+              provider: `${provider.id}/${provider.model}`
+            }
+          : undefined
       });
       const revised = parsed.revised_lines;
       g.lines = revised;

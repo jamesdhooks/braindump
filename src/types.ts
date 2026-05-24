@@ -33,6 +33,7 @@ export type Attachment = {
 };
 
 export type RevisionSource = 'user' | 'auto-format' | 'ramble' | 'brainstorm' | 'llm-edit' | 'import';
+export type GroupRenderAs = 'tasks';
 
 export type Revision = {
   id: string;
@@ -41,6 +42,14 @@ export type Revision = {
   lines: string[];
   model?: string;
   diffSummary?: string;
+  exchange?: {
+    messages: LLMMessage[];
+    response: string;
+    inputTokens: number;
+    outputTokens: number;
+    latencyMs: number;
+    provider?: string;
+  };
 };
 
 export type NoteGroup = {
@@ -49,6 +58,7 @@ export type NoteGroup = {
   createdAt: number;
   updatedAt: number;
   pinned: boolean;
+  completedAt?: number;
   tags?: string[];
   attachments?: Attachment[];
   history: Revision[];
@@ -57,6 +67,11 @@ export type NoteGroup = {
   brainstormId?: string;
   category?: string;
   suggestedTabId?: string;
+  renderAs?: GroupRenderAs;
+  /** Per-line state by line index. Used for sub-task checkbox toggles. */
+  subStates?: Record<number, { completed?: boolean }>;
+  /** Set when QA has been performed (Phase 5: code-feature gate before archiving). */
+  qaAt?: number | null;
 };
 
 export type Category = {
@@ -71,6 +86,13 @@ export type MotionPreset = 'calm' | 'floaty' | 'reduced';
 export type DailyDigest = {
   date: string;
   headline: string;
+  overview?: {
+    createdCount: number;
+    completedCount: number;
+    qaCount: number;
+    archivedCount: number;
+    summary: string;
+  };
   byTab: { tabId: string; summary: string; highlights: string[] }[];
   carryForward: string[];
   stale: string[];
@@ -83,6 +105,66 @@ export type ClawConfig = {
   allowOutsideCwd: boolean;
   allowGitPush: boolean;
   allowRm: boolean;
+};
+
+export type TaskComplexity = 'simple' | 'complex' | 'crazy';
+export type TaskComplexitySource = 'manual' | 'automatic';
+
+export type RunnerCliConfig = {
+  enabled: boolean;
+  binaryPath?: string;
+  model?: { simple?: string; complex?: string; crazy?: string };
+  extraArgs?: string[];
+};
+
+export type RunnersConfig = {
+  claudeCli?: RunnerCliConfig;
+  copilotCli?: RunnerCliConfig;
+};
+
+export type RunnerStatusInfo = {
+  id: 'claude-cli' | 'copilot-cli';
+  enabled: boolean;
+  available: boolean;
+  binary?: string;
+  version?: string;
+  error?: string;
+};
+
+export type AppSkillCwdMode = 'active-tab-project-or-repo' | 'repo';
+
+export type AppSkillClawExecutor = {
+  kind: 'claw';
+  backend?: string;
+  skillId: string;
+  skillFileName: string;
+  skillInstructions: string;
+  system?: string;
+  prompt: string;
+  cwdMode: AppSkillCwdMode;
+};
+
+export type AppSkillRawExecutor = {
+  kind: 'raw';
+  shell: 'powershell' | 'cmd';
+  command: string;
+  elevated?: boolean;
+  cwdMode: AppSkillCwdMode;
+};
+
+export type AppSkillExecutor = AppSkillClawExecutor | AppSkillRawExecutor;
+
+export type AppSkillDraft = {
+  title: string;
+  description: string;
+  request: string;
+  executor: AppSkillExecutor;
+};
+
+export type AppSkill = AppSkillDraft & {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type ClawDraft = {
@@ -129,7 +211,31 @@ export type ClawJob = {
   artifacts: ClawJobArtifact[];
   pendingPrompts: { promptId: string; question: string; options?: string[] }[];
   summary?: string;
+  report?: JobReport;
+  skillId?: string;
+  skillTitle?: string;
   metrics?: { durationMs: number; tokensIn: number; tokensOut: number; files: number; diffs: number };
+  /** Full record of what was sent to the agent for auditing / debugging. */
+  invocation?: {
+    executionType?: 'claw' | 'runner' | 'raw';
+    runnerId?: 'claude-cli' | 'copilot-cli';
+    complexity?: TaskComplexity;
+    complexitySource?: TaskComplexitySource;
+    binary: string;
+    args: string[];
+    prompt: string;
+    system?: string;
+    cwd?: string;
+  };
+};
+
+export type JobReport = {
+  status: 'success' | 'partial' | 'failed';
+  summary: string;
+  completed: string[];
+  changes: string[];
+  blockers: string[];
+  next_steps: string[];
 };
 
 export type SavedSearch = {
@@ -151,9 +257,11 @@ export type Tab = {
   name: string;
   color?: string;
   order: number;
+  lastPrioritySortAt?: number;
   groups: NoteGroup[];
   autoFormatEnabled?: boolean;
   projectContext?: string;
+  projectPath?: string;
   aliases?: string[];
 };
 
@@ -186,6 +294,8 @@ export type AutoFormatConfig = {
   preserveVoice: boolean;
   requireConfidenceAbove: number;
   dailyRequestCap: number;
+  formatStyle?: 'plain' | 'markdown';
+  guidance?: string;
 };
 
 export type AutoFormatStatus = {
@@ -215,6 +325,7 @@ export type PersistedStore = {
   autoFormat: AutoFormatConfig;
   ui: {
     theme: 'dark' | 'light' | 'system';
+    accentColor: string;
     focus: boolean;
     archiveOpen: boolean;
     brainstormOpen: boolean;
@@ -232,8 +343,10 @@ export type PersistedStore = {
   categories: Category[];
   digests?: DailyDigest[];
   savedSearches?: SavedSearch[];
+  skills?: AppSkill[];
   claw?: ClawConfig;
   clawJobs?: ClawJob[];
+  runners?: RunnersConfig;
   usage: {
     perDay: Record<string, UsageDay>;
     monthlyCapUsd?: number;

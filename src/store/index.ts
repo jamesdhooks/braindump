@@ -12,8 +12,20 @@ import type {
   AutoFormatStatus,
   LLMProviderId
 } from '../types';
-import { extractHashtags, splitIntoGroups } from '../lib/groupSplit';
+import { extractHashtags } from '../lib/groupSplit';
 import { hashLine } from '../lib/contentHash';
+import { advancePrioritySortAt, getGroupDisplayBucket, groupPriorityRank } from '../lib/groupPriority';
+import { isTaskRenderMode, normalizeTaskModeLines, parseTaskLine, toTaskMarkdownLine } from '../lib/taskMode';
+
+function sortGroupsByPriorityOrder(groups: NoteGroup[]) {
+  return groups
+    .map((group, index) => ({ group, index }))
+    .sort((a, b) => {
+      const rankDiff = groupPriorityRank(a.group) - groupPriorityRank(b.group);
+      return rankDiff !== 0 ? rankDiff : a.index - b.index;
+    })
+    .map(({ group }) => group);
+}
 
 export function applyThemeToDom(theme: 'dark' | 'light' | 'system') {
   if (typeof document === 'undefined') return;
@@ -29,7 +41,75 @@ export function applyThemeToDom(theme: 'dark' | 'light' | 'system') {
   else root.classList.remove('dark');
 }
 
+const DEFAULT_ACCENT_COLOR = '#7c8cff';
+
+export function applyAccentColorToDom(hex?: string) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+
+  const normalizedHex =
+    typeof hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(hex)
+      ? hex
+      : DEFAULT_ACCENT_COLOR;
+
+  // Parse hex color and generate accent shades
+  const rgb = parseInt(normalizedHex.slice(1), 16);
+  const r = (rgb >> 16) & 255;
+  const g = (rgb >> 8) & 255;
+  const b = rgb & 255;
+
+  // Convert RGB to HSL for better shade generation
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  let h = 0, s = 0, l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rn: h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6; break;
+      case gn: h = ((bn - rn) / d + 2) / 6; break;
+      case bn: h = ((rn - gn) / d + 4) / 6; break;
+    }
+  }
+
+  // Generate shades: darker (600), base (500), lighter (400)
+  const hslToRgb = (h: number, s: number, l: number) => {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+    const m = l - c / 2;
+    let rr = 0, gg = 0, bb = 0;
+
+    if (h < 1/6) { rr = c; gg = x; bb = 0; }
+    else if (h < 2/6) { rr = x; gg = c; bb = 0; }
+    else if (h < 3/6) { rr = 0; gg = c; bb = x; }
+    else if (h < 4/6) { rr = 0; gg = x; bb = c; }
+    else if (h < 5/6) { rr = x; gg = 0; bb = c; }
+    else { rr = c; gg = 0; bb = x; }
+
+    const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return `#${toHex(rr)}${toHex(gg)}${toHex(bb)}`;
+  };
+
+  const accent600 = hslToRgb(h, s, Math.max(0.3, l - 0.15));
+  const accent500 = normalizedHex;
+  const accent400 = hslToRgb(h, s, Math.min(0.9, l + 0.15));
+
+  // Calculate glow with alpha
+  const glowAlpha = 0.22;
+  const glowColor = `rgba(${r}, ${g}, ${b}, ${glowAlpha})`;
+
+  root.style.setProperty('--accent-400', accent400);
+  root.style.setProperty('--accent-500', accent500);
+  root.style.setProperty('--accent-600', accent600);
+  root.style.setProperty('--accent-glow', glowColor);
+}
+
 type UIOnly = {
+  workspaceView: 'dumps' | 'skills';
   highlightedLines: Record<string, number[]>;
   pulseOpen: boolean;
   pulseData: {
@@ -40,7 +120,7 @@ type UIOnly = {
   dailyReportOpen: boolean;
   clawPanelOpen: boolean;
   clawFilterGroupId: string | null;
-  clawDraftFor: { tabId: string; groupId: string } | null;
+  clawDraftFor: { tabId: string; groupId: string; complexity?: import('../types').TaskComplexity } | null;
   clawBrokerState: {
     status: 'disconnected' | 'connecting' | 'connected' | 'error';
     clawVersion?: string;
@@ -52,8 +132,10 @@ type UIOnly = {
     sessions: string[];
   };
   clawSkillsEditorOpen: boolean;
-  hoverTargetGroupId: string | null;
-  lockedTargetGroupId: string | null;
+  runnerStatuses: import('../types').RunnerStatusInfo[];
+  unreadCompletedClawJobIds: string[];
+  selectedGroupIds: string[];
+  selectMode: boolean;
   focusedGroupId: string | null;
   searchOpen: boolean;
   searchQuery: string;
@@ -75,6 +157,7 @@ export type StoreState = PersistedStore &
     hydrated: boolean;
     hydrate: (p: PersistedStore) => void;
     persist: () => void;
+    setWorkspaceView: (view: UIOnly['workspaceView']) => void;
     setActiveTab: (id: string) => void;
     newTab: (name?: string) => string;
     renameTab: (id: string, name: string) => void;
@@ -82,13 +165,17 @@ export type StoreState = PersistedStore &
     reorderTabs: (order: string[]) => void;
     setTabColor: (id: string, color: string | undefined) => void;
 
-    commitText: (text: string, opts?: { tabId?: string; targetGroupId?: string | null; pinned?: boolean; source?: 'user' | 'ramble' | 'brainstorm' }) => string[];
+    commitText: (text: string, opts?: { tabId?: string; pinned?: boolean; source?: 'user' | 'ramble' | 'brainstorm' }) => string[];
     addGroupLines: (tabId: string, lines: string[], pinned?: boolean, source?: 'user' | 'ramble' | 'brainstorm', brainstormId?: string) => string;
     appendToGroup: (tabId: string, groupId: string, lines: string[]) => void;
     updateGroupLines: (tabId: string, groupId: string, lines: string[], source?: 'user' | 'llm-edit') => void;
     togglePin: (tabId: string, groupId: string) => void;
     setAutoFormatOptOut: (tabId: string, groupId: string, opt: boolean) => void;
+    setGroupRenderAs: (tabId: string, groupId: string, renderAs?: import('../types').GroupRenderAs) => void;
+    toggleSubState: (tabId: string, groupId: string, lineIndex: number) => void;
+    toggleQa: (tabId: string, groupId: string) => void;
     completeGroup: (tabId: string, groupId: string) => void;
+    deleteGroup: (tabId: string, groupId: string) => void;
     restoreFromArchive: (archiveIndex: number) => void;
     deleteArchiveEntry: (archiveIndex: number) => void;
     clearArchiveOlderThan: (days: number) => void;
@@ -109,6 +196,7 @@ export type StoreState = PersistedStore &
     setBrainstormOpen: (open: boolean) => void;
     setFocusMode: (on: boolean) => void;
     setTheme: (theme: 'dark' | 'light' | 'system') => void;
+    setAccentColor: (hex: string) => void;
     setMotion: (m: 'calm' | 'floaty' | 'reduced') => void;
     setAutoFormatStatus: (s: AutoFormatStatus) => void;
     flashRecentlyFormatted: (groupId: string) => void;
@@ -123,6 +211,7 @@ export type StoreState = PersistedStore &
     setAutoFormatConfig: (patch: Partial<PersistedStore['autoFormat']>) => void;
     setPrivacy: (patch: Partial<PersistedStore['ui']['privacy']>) => void;
     setAutoSort: (on: boolean) => void;
+    sortGroupsByPriority: (tabId?: string) => boolean;
     setDailyReportHour: (h: number) => void;
 
     setHighlightedLines: (groupId: string, indices: number[]) => void;
@@ -134,9 +223,18 @@ export type StoreState = PersistedStore &
     setClawPanelOpen: (open: boolean) => void;
     setClawFilterGroup: (groupId: string | null) => void;
     setClawSkillsEditorOpen: (open: boolean) => void;
-    setClawDraftSession: (target: { tabId: string; groupId: string } | null) => void;
+    setClawDraftSession: (target: { tabId: string; groupId: string; complexity?: import('../types').TaskComplexity } | null) => void;
     setClawBrokerState: (s: UIOnly['clawBrokerState']) => void;
     setClawConfig: (patch: Partial<NonNullable<PersistedStore['claw']>>) => void;
+    setRunnerConfig: (id: 'claudeCli' | 'copilotCli', patch: Partial<import('../types').RunnerCliConfig>) => void;
+    setRunnerStatuses: (statuses: import('../types').RunnerStatusInfo[]) => void;
+    upsertSkill: (skill: import('../types').AppSkill) => void;
+    deleteSkill: (skillId: string) => void;
+    markCompletedClawJobsRead: (sessionIds: string[]) => void;
+    toggleSelectGroup: (groupId: string) => void;
+    clearSelection: () => void;
+    selectAllInActiveTab: () => void;
+    setSelectMode: (on: boolean) => void;
     upsertClawJob: (job: import('../types').ClawJob) => void;
     appendClawEvent: (sessionId: string, event: import('../types').ClawJobEvent) => void;
     appendClawArtifact: (sessionId: string, artifact: import('../types').ClawJobArtifact) => void;
@@ -144,7 +242,7 @@ export type StoreState = PersistedStore &
     pushClawPrompt: (sessionId: string, prompt: { promptId: string; question: string; options?: string[] }) => void;
     resolveClawPrompt: (sessionId: string, promptId: string) => void;
 
-    setProjectContext: (tabId: string, context: string, aliases?: string[]) => void;
+    setProjectContext: (tabId: string, context: string, aliases?: string[], projectPath?: string) => void;
     setCategory: (tabId: string, groupId: string, category: string | null) => void;
     moveGroup: (fromTabId: string, toTabId: string, groupId: string) => void;
     autoCategorizeGroup: (tabId: string, groupId: string) => Promise<void>;
@@ -161,6 +259,7 @@ export type StoreState = PersistedStore &
 
 function emptyUI(): UIOnly {
   return {
+    workspaceView: 'dumps',
     highlightedLines: {},
     pulseOpen: false,
     pulseData: null,
@@ -170,8 +269,10 @@ function emptyUI(): UIOnly {
     clawDraftFor: null,
     clawBrokerState: { status: 'disconnected', backends: [], skills: [], transport: 'none', sessions: [] },
     clawSkillsEditorOpen: false,
-    hoverTargetGroupId: null,
-    lockedTargetGroupId: null,
+    runnerStatuses: [],
+    unreadCompletedClawJobIds: [],
+    selectedGroupIds: [],
+    selectMode: false,
     focusedGroupId: null,
     searchOpen: false,
     searchQuery: '',
@@ -211,6 +312,7 @@ export const useStore = create<StoreState>()(
     },
     ui: {
       theme: 'dark',
+      accentColor: '#7c8cff',
       focus: false,
       archiveOpen: false,
       brainstormOpen: false,
@@ -226,6 +328,7 @@ export const useStore = create<StoreState>()(
       { id: 'code-feature', label: 'Code feature', color: '#9effc7' },
       { id: 'household-todo', label: 'Household todo', color: '#ffd38a' }
     ],
+    skills: [],
     claw: {
       defaultBackend: 'claude-code',
       autoSendCategories: [],
@@ -234,6 +337,24 @@ export const useStore = create<StoreState>()(
       allowRm: false
     },
     clawJobs: [],
+    runners: {
+      claudeCli: {
+        enabled: false,
+        model: {
+          simple: 'claude-haiku-4-5-20251001',
+          complex: 'claude-sonnet-4-6',
+          crazy: 'claude-opus-4-7'
+        }
+      },
+      copilotCli: {
+        enabled: false,
+        model: {
+          simple: 'gpt-4o-mini',
+          complex: 'gpt-4.1',
+          crazy: 'o3'
+        }
+      }
+    },
     usage: { perDay: {} },
     hydrated: false,
 
@@ -242,6 +363,11 @@ export const useStore = create<StoreState>()(
     hydrate(p) {
       set((s) => {
         Object.assign(s, p);
+        s.skills = Array.isArray(p.skills) ? p.skills : [];
+        s.runners = p.runners ?? s.runners;
+        if (!/^#[0-9a-fA-F]{6}$/.test(s.ui?.accentColor ?? '')) {
+          s.ui.accentColor = DEFAULT_ACCENT_COLOR;
+        }
         s.hydrated = true;
       });
     },
@@ -264,17 +390,25 @@ export const useStore = create<StoreState>()(
           categories: s.categories,
           digests: s.digests,
           savedSearches: s.savedSearches,
+          skills: s.skills,
           claw: s.claw,
           clawJobs: s.clawJobs,
+          runners: s.runners,
           usage: s.usage
         };
         void window.braindump.setState(persisted);
       }, 200);
     },
 
+    setWorkspaceView(view) {
+      set((s) => {
+        s.workspaceView = view;
+      });
+    },
     setActiveTab(id) {
       set((s) => {
         s.activeTabId = id;
+        s.workspaceView = 'dumps';
       });
       get().persist();
     },
@@ -284,6 +418,7 @@ export const useStore = create<StoreState>()(
         const order = s.tabs.length ? Math.max(...s.tabs.map((t) => t.order)) + 1 : 0;
         s.tabs.push({ id, name: name || `Tab ${s.tabs.length + 1}`, groups: [], order });
         s.activeTabId = id;
+        s.workspaceView = 'dumps';
       });
       get().persist();
       return id;
@@ -325,18 +460,15 @@ export const useStore = create<StoreState>()(
 
     commitText(text, opts) {
       const tabId = opts?.tabId ?? get().activeTabId;
-      const groups = splitIntoGroups(text);
-      if (!groups.length) return [];
+      const trimmed = text.replace(/\r\n?/g, '\n').trim();
+      if (!trimmed) return [];
+      const lines = trimmed.split('\n').map((l) => l.replace(/\s+$/, '')).filter((l) => l.length);
+      if (!lines.length) return [];
       const source = opts?.source ?? 'user';
-      if (opts?.targetGroupId && groups.length === 1) {
-        get().appendToGroup(tabId, opts.targetGroupId, groups[0]);
-        return [opts.targetGroupId];
-      }
-      const ids: string[] = [];
-      for (const lines of groups) {
-        ids.push(get().addGroupLines(tabId, lines, opts?.pinned, source));
-      }
-      return ids;
+      // One dump = one group. No splitting on blank lines, no append-to-target.
+      const id = get().addGroupLines(tabId, lines, opts?.pinned, source);
+      if (tabId === get().activeTabId) get().setFocusedGroup(id);
+      return [id];
     },
 
     addGroupLines(tabId, lines, pinned, source = 'user', brainstormId) {
@@ -374,8 +506,9 @@ export const useStore = create<StoreState>()(
         const g = t?.groups.find((x) => x.id === groupId);
         if (!g) return;
         const prev = [...g.lines];
+        const nextLines = isTaskRenderMode(g.renderAs) ? normalizeTaskModeLines(lines) : lines;
         g.history.push({ id: nanoid(8), at: Date.now(), source: 'user', lines: prev });
-        g.lines = [...g.lines, ...lines];
+        g.lines = [...g.lines, ...nextLines];
         g.tags = extractHashtags(g.lines);
         g.updatedAt = Date.now();
       });
@@ -387,9 +520,10 @@ export const useStore = create<StoreState>()(
         const t = s.tabs.find((x) => x.id === tabId);
         const g = t?.groups.find((x) => x.id === groupId);
         if (!g) return;
+        const nextLines = isTaskRenderMode(g.renderAs) ? normalizeTaskModeLines(lines) : lines;
         g.history.push({ id: nanoid(8), at: Date.now(), source, lines: [...g.lines] });
-        g.lines = lines;
-        g.tags = extractHashtags(lines);
+        g.lines = nextLines;
+        g.tags = extractHashtags(nextLines);
         g.updatedAt = Date.now();
       });
       get().persist();
@@ -415,31 +549,81 @@ export const useStore = create<StoreState>()(
       });
       get().persist();
     },
+    setGroupRenderAs(tabId, groupId, renderAs) {
+      set((s) => {
+        const g = s.tabs.find((x) => x.id === tabId)?.groups.find((x) => x.id === groupId);
+        if (!g) return;
+        g.renderAs = renderAs;
+        if (isTaskRenderMode(renderAs)) {
+          g.lines = normalizeTaskModeLines(g.lines);
+        }
+        g.tags = extractHashtags(g.lines);
+        g.updatedAt = Date.now();
+      });
+      get().persist();
+    },
+    toggleSubState(tabId, groupId, lineIndex) {
+      set((s) => {
+        const g = s.tabs.find((x) => x.id === tabId)?.groups.find((x) => x.id === groupId);
+        if (!g) return;
+        const line = g.lines[lineIndex] ?? '';
+        const parsed = parseTaskLine(line, isTaskRenderMode(g.renderAs));
+        if (!parsed) return;
+        // Persist via subStates AND keep the markdown checkbox in lines in sync.
+        g.subStates = g.subStates ?? {};
+        const prev = g.subStates[lineIndex]?.completed ?? parsed.checked;
+        const next = !prev;
+        g.subStates[lineIndex] = { ...(g.subStates[lineIndex] ?? {}), completed: next };
+        g.lines[lineIndex] = toTaskMarkdownLine(line, next, isTaskRenderMode(g.renderAs));
+        g.updatedAt = Date.now();
+      });
+      get().persist();
+    },
+    toggleQa(tabId, groupId) {
+      set((s) => {
+        const g = s.tabs.find((x) => x.id === tabId)?.groups.find((x) => x.id === groupId);
+        if (!g) return;
+        g.qaAt = g.qaAt ? null : Date.now();
+      });
+      get().persist();
+    },
     completeGroup(tabId, groupId) {
       const now = Date.now();
+      let toggled = false;
+      set((s) => {
+        const tab = s.tabs.find((x) => x.id === tabId);
+        if (!tab) return;
+        const group = tab.groups.find((g) => g.id === groupId);
+        if (!group || group.pinned) return;
+        const wasCompleted = Boolean(group.completedAt);
+        group.completedAt = wasCompleted ? undefined : now;
+        group.qaAt = null;
+        toggled = true;
+      });
+      if (toggled) get().persist();
+    },
+    deleteGroup(tabId, groupId) {
       let removed: NoteGroup | null = null;
       set((s) => {
         const tab = s.tabs.find((x) => x.id === tabId);
         if (!tab) return;
         const idx = tab.groups.findIndex((g) => g.id === groupId);
         if (idx < 0) return;
-        const group = tab.groups[idx];
-        if (group.pinned) return;
+        removed = JSON.parse(JSON.stringify(tab.groups[idx])) as NoteGroup;
         tab.groups.splice(idx, 1);
-        s.archive.unshift({ group, tabId, completedAt: now });
-        removed = group;
-        s.undoStack.push({ kind: 'archive', tabId, group, at: now });
+        s.undoStack.push({ kind: 'archive', tabId, group: removed, at: Date.now() });
+        if (s.undoStack.length > 10) s.undoStack.shift();
       });
       if (removed) {
+        get().persist();
+        void window.braindump.embeddings.drop([groupId]);
         get().showToast({
-          message: 'Archived — Ctrl+Z to restore',
+          message: 'Dump deleted',
           kind: 'info',
-          actionLabel: 'Restore',
+          actionLabel: 'Undo',
           onAction: () => get().undo()
         });
       }
-      get().persist();
-      void window.braindump?.sync?.enqueue('archiveGroup', { tabId, groupId, completedAt: now });
     },
     restoreFromArchive(archiveIndex) {
       set((s) => {
@@ -536,14 +720,12 @@ export const useStore = create<StoreState>()(
     },
 
     setHoverTarget(id) {
-      set((s) => {
-        s.hoverTargetGroupId = id;
-      });
+      // Deprecated: hover/lock target system removed. Kept as no-op for backwards compat.
+      void id;
     },
     setLockedTarget(id) {
-      set((s) => {
-        s.lockedTargetGroupId = id;
-      });
+      // Deprecated: hover/lock target system removed. Kept as no-op for backwards compat.
+      void id;
     },
     setFocusedGroup(id) {
       set((s) => {
@@ -599,6 +781,13 @@ export const useStore = create<StoreState>()(
         s.ui.theme = theme;
       });
       applyThemeToDom(theme);
+      get().persist();
+    },
+    setAccentColor(hex) {
+      set((s) => {
+        s.ui.accentColor = hex;
+      });
+      applyAccentColorToDom(hex);
       get().persist();
     },
     setMotion(m) {
@@ -700,6 +889,28 @@ export const useStore = create<StoreState>()(
       });
       get().persist();
     },
+    sortGroupsByPriority(tabId) {
+      let changed = false;
+      let shouldPersist = false;
+      set((s) => {
+        const targetTabId = tabId ?? s.activeTabId;
+        const tab = s.tabs.find((x) => x.id === targetTabId);
+        if (!tab) return;
+        const prevSortedAt = tab.lastPrioritySortAt;
+        const bucketsBefore = tab.groups.map((group) => getGroupDisplayBucket(group, prevSortedAt));
+        const next = sortGroupsByPriorityOrder(tab.groups);
+        const nextSortedAt = advancePrioritySortAt(tab.lastPrioritySortAt);
+        const bucketsAfter = next.map((group) => getGroupDisplayBucket(group, nextSortedAt));
+        changed =
+          next.some((group, index) => group.id !== tab.groups[index]?.id) ||
+          bucketsBefore.some((bucket, index) => bucket !== bucketsAfter[index]);
+        tab.groups = next;
+        tab.lastPrioritySortAt = nextSortedAt;
+        shouldPersist = true;
+      });
+      if (shouldPersist) get().persist();
+      return changed;
+    },
     setHighlightedLines(groupId, indices) {
       set((s) => {
         s.highlightedLines[groupId] = indices;
@@ -737,12 +948,13 @@ export const useStore = create<StoreState>()(
       get().persist();
     },
 
-    setProjectContext(tabId, context, aliases) {
+    setProjectContext(tabId, context, aliases, projectPath) {
       set((s) => {
         const t = s.tabs.find((x) => x.id === tabId);
         if (!t) return;
         t.projectContext = context || undefined;
         t.aliases = aliases ?? t.aliases;
+        t.projectPath = projectPath || undefined;
       });
       get().persist();
     },
@@ -884,6 +1096,72 @@ export const useStore = create<StoreState>()(
       });
       get().persist();
     },
+    setRunnerConfig(id, patch) {
+      set((s) => {
+        s.runners = s.runners ?? {};
+        const cur = s.runners[id] ?? { enabled: false };
+        s.runners[id] = { ...cur, ...patch };
+      });
+      get().persist();
+    },
+    setRunnerStatuses(statuses) {
+      set((s) => {
+        s.runnerStatuses = statuses;
+      });
+    },
+    upsertSkill(skill) {
+      set((s) => {
+        s.skills = s.skills ?? [];
+        const index = s.skills.findIndex((entry) => entry.id === skill.id);
+        if (index >= 0) {
+          s.skills[index] = { ...s.skills[index], ...skill, updatedAt: skill.updatedAt };
+        } else {
+          s.skills.unshift(skill);
+        }
+      });
+      get().persist();
+    },
+    deleteSkill(skillId) {
+      set((s) => {
+        s.skills = (s.skills ?? []).filter((entry) => entry.id !== skillId);
+      });
+      get().persist();
+    },
+    markCompletedClawJobsRead(sessionIds) {
+      if (!sessionIds.length) return;
+      set((s) => {
+        const toRead = new Set(sessionIds);
+        const nextUnread = s.unreadCompletedClawJobIds.filter((id) => !toRead.has(id));
+        if (nextUnread.length === s.unreadCompletedClawJobIds.length) return;
+        s.unreadCompletedClawJobIds = nextUnread;
+      });
+    },
+    toggleSelectGroup(groupId) {
+      set((s) => {
+        const i = s.selectedGroupIds.indexOf(groupId);
+        if (i >= 0) s.selectedGroupIds.splice(i, 1);
+        else s.selectedGroupIds.push(groupId);
+      });
+    },
+    clearSelection() {
+      set((s) => {
+        s.selectedGroupIds = [];
+        s.selectMode = false;
+      });
+    },
+    setSelectMode(on) {
+      set((s) => {
+        s.selectMode = on;
+        if (!on) s.selectedGroupIds = [];
+      });
+    },
+    selectAllInActiveTab() {
+      set((s) => {
+        const tab = s.tabs.find((t) => t.id === s.activeTabId);
+        if (!tab) return;
+        s.selectedGroupIds = tab.groups.map((g) => g.id);
+      });
+    },
     upsertClawJob(job) {
       set((s) => {
         s.clawJobs = s.clawJobs ?? [];
@@ -913,7 +1191,14 @@ export const useStore = create<StoreState>()(
       set((s) => {
         const job = (s.clawJobs ?? []).find((j) => j.sessionId === sessionId);
         if (!job) return;
+        const prevState = job.state;
         Object.assign(job, patch);
+        const nextState = job.state;
+        const wasTerminal = prevState === 'done' || prevState === 'error' || prevState === 'interrupted';
+        const isTerminal = nextState === 'done' || nextState === 'error' || nextState === 'interrupted';
+        if (!wasTerminal && isTerminal && !s.unreadCompletedClawJobIds.includes(sessionId)) {
+          s.unreadCompletedClawJobIds.push(sessionId);
+        }
       });
       get().persist();
     },
@@ -967,5 +1252,6 @@ export function useActiveTab(): Tab | undefined {
 }
 
 export function useEffectiveTargetGroupId(): string | null {
-  return useStore((s) => s.lockedTargetGroupId ?? s.hoverTargetGroupId);
+  // Deprecated: hover/lock target system removed. Always null.
+  return null;
 }

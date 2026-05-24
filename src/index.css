@@ -12,7 +12,6 @@ body,
 html {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-feature-settings: 'cv11', 'ss01', 'ss02';
-  background: transparent;
   color: var(--fg-0);
   transition: color 240ms ease;
 }
@@ -20,7 +19,6 @@ html {
 body {
   margin: 0;
   overflow: hidden;
-  background: transparent;
   color: var(--fg-0);
 }
 
@@ -69,14 +67,9 @@ body {
   transition: background-color 180ms ease, border-color 180ms ease, transform 220ms var(--ease-spring);
 }
 
-.card.is-target {
-  border-color: var(--accent-500);
-  background: color-mix(in srgb, var(--accent-500) 8%, var(--surface-2));
-}
-
 .card.is-focused {
-  outline: 1px solid var(--accent-500);
-  outline-offset: 0px;
+  border-color: color-mix(in srgb, var(--accent-500) 75%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-500) 55%, transparent), var(--shadow-card);
 }
 
 textarea.composer {
@@ -112,6 +105,39 @@ textarea.composer {
   }
   100% {
     box-shadow: 0 0 0 0 transparent, var(--shadow-card);
+  }
+}
+
+/* Running job: animated shiny border sweep around the dump card */
+.card.job-shine {
+  position: relative;
+  overflow: hidden;
+}
+
+.card.job-shine::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 290deg,
+    color-mix(in srgb, var(--accent-400) 78%, white) 326deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  padding: 1px;
+  opacity: 0.95;
+  animation: job-shine-spin 2.2s linear infinite;
+}
+
+@keyframes job-shine-spin {
+  to {
+    transform: rotate(1turn);
   }
 }
 

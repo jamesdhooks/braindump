@@ -1,6 +1,6 @@
 import { forwardRef } from 'react';
 import { motion } from 'framer-motion';
-import { usePreset, transitionFor, effectivePreset, type MotionPreset } from './index';
+import { usePreset, transitionFor, layoutTransitionFor, effectivePreset, type MotionPreset } from './index';
 
 type Phases = {
   initial: Record<string, unknown>;
@@ -35,6 +35,7 @@ type Props = {
   onFocus?: (e: React.FocusEvent<HTMLDivElement>) => void;
   onMouseEnter?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onMouseLeave?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onClickCapture?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   children?: React.ReactNode;
 };
@@ -58,7 +59,14 @@ export const MotionCard = forwardRef<HTMLDivElement, Props>(function MotionCard(
       initial={phases.initial}
       animate={phases.animate}
       exit={phases.exit}
-      transition={{ ...transitionFor(preset), delay }}
+      transition={
+        layout
+          ? {
+              default: { ...transitionFor(preset), delay },
+              layout: layoutTransitionFor(preset)
+            }
+          : { ...transitionFor(preset), delay }
+      }
       {...handlers}
     >
       {children}

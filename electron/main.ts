@@ -15,10 +15,14 @@ import {
   runProjectContext,
   runDailyReport,
   runStalePulse,
-  runTemplate
+  runTemplate,
+  runCombineGroups,
+  runGenerateAppSkill
 } from './llm/skills';
 import { runClawDraft } from './llm/skills/clawDraft';
+import { finalizeGeneratedAppSkill, runStoredAppSkill } from './appSkills';
 import { clawBroker } from './claw/broker';
+import * as runners from './runners/registry';
 import { ensureDefaultSkills, listSkills, writeSkill, deleteSkill, openSkillsFolder } from './claw/skills';
 import { isDangerous } from '../packages/claw/protocol';
 import * as sync from './sync/client';
@@ -33,11 +37,15 @@ import {
   revertToBackup,
   revertToSnapshot,
   exportToFile,
-  importFromFile
+  importFromFile,
+  setDataFolder,
+  clearDataFolderOverride
 } from './persistence';
 
-const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:9173';
 const IS_DEV = Boolean(process.env.VITE_DEV_SERVER_URL);
+const LOST_SESSION_SUMMARY =
+  'This code session was interrupted because Braindump closed or restarted before it could finish. Use Continue to resume from the saved context.';
 
 let mainWindow: BrowserWindow | null = null;
 let quickWindow: BrowserWindow | null = null;
@@ -81,18 +89,32 @@ function trayIconPath(): string {
   return '';
 }
 
+function appIconPath(): string {
+  const candidates = [
+    path.join(process.resourcesPath || '', 'build', 'icon.ico'),
+    path.join(__dirname, '..', 'build', 'icon.ico'),
+    path.join(process.resourcesPath || '', 'build', 'tray.png'),
+    path.join(__dirname, '..', 'build', 'tray.png'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return '';
+}
+
 function createMainWindow() {
+  const iconP = appIconPath();
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 760,
     minWidth: 720,
     minHeight: 520,
-    backgroundColor: '#00000000',
+    backgroundColor: '#0c0e13',
     title: 'Braindump',
     show: false,
-    frame: false,
-    transparent: true,
+    titleBarStyle: 'hidden',
     autoHideMenuBar: true,
+    ...(iconP ? { icon: iconP } : {}),
     webPreferences: {
       preload: resolvePreload(),
       contextIsolation: true,
@@ -105,6 +127,7 @@ function createMainWindow() {
     mainWindow?.show();
     if (mainWindow) {
       clawBroker.attachWindow(mainWindow);
+      runners.attachWindow(mainWindow);
       sync.attachWindow(mainWindow);
       sync.startFlusher();
     }
@@ -296,6 +319,9 @@ function wireIpc() {
     if (!isQuitting) mainWindow?.hide();
   });
   ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
+  ipcMain.handle('window:open-devtools', () => {
+    mainWindow?.webContents.openDevTools();
+  });
   ipcMain.handle('window:hide-quick', () => {
     quickWindow?.hide();
   });
@@ -380,6 +406,17 @@ function wireIpc() {
 
   ipcMain.handle('llm:provider-secret-keyname', (_e, { providerId }: { providerId: string }) => secretKeyForProvider(providerId as never));
 
+  ipcMain.handle('llm:skill-log', (_e, { feature, limit = 20 }: { feature?: string; limit?: number }) => {
+    const logPath = path.join(app.getPath('userData'), 'llm-log.jsonl');
+    if (!fs.existsSync(logPath)) return [];
+    const lines = fs.readFileSync(logPath, 'utf8').trimEnd().split('\n').filter(Boolean);
+    const parsed = lines.flatMap((l) => {
+      try { return [JSON.parse(l) as Record<string, unknown>]; } catch { return []; }
+    });
+    const filtered = feature ? parsed.filter((e) => e.feature === feature) : parsed;
+    return filtered.slice(-limit).reverse();
+  });
+
   ipcMain.handle('autoformat:toggle', (_e, enabled?: boolean) => {
     const s = getState();
     s.autoFormat.enabled = typeof enabled === 'boolean' ? enabled : !s.autoFormat.enabled;
@@ -391,6 +428,9 @@ function wireIpc() {
   });
   ipcMain.handle('autoformat:status', () => autoFormatter.getStatus());
   ipcMain.handle('autoformat:tick', () => autoFormatter.tick());
+  ipcMain.handle('autoformat:format-group', (_e, { tabId, groupId }: { tabId: string; groupId: string }) =>
+    autoFormatter.formatGroup(tabId, groupId)
+  );
 
   ipcMain.handle('attachments:save-clipboard', () => {
     const img = clipboard.readImage();
@@ -432,8 +472,18 @@ function wireIpc() {
     return r.filePaths[0] || null;
   });
 
+  ipcMain.handle('dialog:open-folder', async () => {
+    const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+    return r.filePaths[0] || null;
+  });
+
   ipcMain.handle('shell:open-external', (_e, url: string) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
+  });
+
+  ipcMain.handle('app:open-llm-log', async () => {
+    const p = path.join(app.getPath('userData'), 'llm-log.jsonl');
+    return shell.openPath(p);
   });
 
   ipcMain.handle('capture:submit', (_e, { tabId, text }: { tabId: string | null; text: string }) => {
@@ -465,6 +515,65 @@ function wireIpc() {
   ipcMain.handle('skill:daily-report', async (_e, args) => runDailyReport(args));
   ipcMain.handle('skill:stale-pulse', async (_e, args) => runStalePulse(args));
   ipcMain.handle('skill:template', async (_e, args: { id: 'meeting' | 'decision' | 'postmortem' }) => runTemplate(args.id));
+  ipcMain.handle('skill:combine-groups', async (_e, args: { groups: { lines: string[] }[]; projectContext?: string; mode?: 'faithful' | 'rewrite' }) => runCombineGroups(args));
+  ipcMain.handle('app-skills:generate', async (_e, args: { request: string; tabId?: string }) => {
+    const request = args.request?.trim();
+    if (!request) return { ok: false, error: 'Request cannot be empty.' };
+    try {
+      const state = getState();
+      const tab = state.tabs.find((entry) => entry.id === args.tabId);
+      const generated = await runGenerateAppSkill({
+        request,
+        activeTabName: tab?.name,
+        projectContext: tab?.projectContext,
+        defaultBackend: state.claw?.defaultBackend,
+        availableBackends: clawBroker.getState().backends
+      });
+      if (!generated.ok || !generated.value) {
+        return { ok: false, error: generated.error ?? 'Unable to generate skill config.' };
+      }
+      const now = Date.now();
+      const skill = finalizeGeneratedAppSkill({
+        id: crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        title: generated.value.title,
+        description: generated.value.description,
+        request,
+        executor: generated.value.executor
+      });
+      return {
+        ok: true,
+        skill,
+        model: generated.model,
+        latencyMs: generated.latencyMs,
+        raw: generated.raw
+      };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  });
+  ipcMain.handle(
+    'app-skills:run',
+    async (
+      _e,
+      args: {
+        skillId: string;
+        tabId: string;
+        sessionId?: string;
+        groupId?: string;
+        skill?: import('../src/types').AppSkill;
+      }
+    ) => {
+      return runStoredAppSkill({
+        skillId: args.skillId,
+        sessionId: args.sessionId ?? crypto.randomUUID(),
+        tabId: args.tabId,
+        groupId: args.groupId,
+        skill: args.skill
+      });
+    }
+  );
 
   ipcMain.handle('persistence:status', () => ({
     loadInfo: getLoadInfo(),
@@ -478,6 +587,23 @@ function wireIpc() {
   ipcMain.handle('persistence:open-folder', () => {
     void shell.openPath(dataFolder());
     return dataFolder();
+  });
+  ipcMain.handle('persistence:pick-folder', async () => {
+    const r = await dialog.showOpenDialog({
+      title: 'Choose a new data folder',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (r.canceled || !r.filePaths[0]) return { canceled: true };
+    return { canceled: false, path: r.filePaths[0] };
+  });
+  ipcMain.handle('persistence:set-folder', async (_e, args: { path: string; force?: boolean }) => {
+    const result = await setDataFolder(args.path, { force: args.force });
+    if (result.ok) broadcastState();
+    return result;
+  });
+  ipcMain.handle('persistence:reset-folder', () => {
+    clearDataFolderOverride();
+    return { ok: true, dataFolder: dataFolder() };
   });
   ipcMain.handle('persistence:export', async () => {
     const r = await dialog.showSaveDialog({
@@ -539,9 +665,10 @@ function wireIpc() {
   ipcMain.handle('claw:state', () => clawBroker.getState());
   ipcMain.handle(
     'claw:start-session',
-    (_e, args: { sessionId?: string; backend: string; cwd: string; skills: string[]; system?: string }) => {
+    (_e, args: { sessionId?: string; tabId?: string; groupId?: string; backend: string; cwd: string; skills: string[]; system?: string }) => {
       const id = args.sessionId ?? crypto.randomUUID();
-      clawBroker.startSession(id, args.backend, args.cwd, args.skills, args.system);
+      const cwd = args.cwd && fs.existsSync(args.cwd) ? args.cwd : process.cwd();
+      clawBroker.startSession(id, args.backend, cwd, args.skills, args.system, { tabId: args.tabId, groupId: args.groupId });
       return { sessionId: id };
     }
   );
@@ -559,6 +686,34 @@ function wireIpc() {
   });
   ipcMain.handle('claw:interrupt-all', () => {
     clawBroker.interruptAll();
+  });
+  ipcMain.handle('claw:recover-sessions', () => clawBroker.recoverSessions());
+  ipcMain.handle('runner:list', () => runners.listRunners());
+  ipcMain.handle('runner:recover-sessions', () => runners.recoverRunnerSessions());
+  ipcMain.handle(
+    'runner:run',
+    (
+      _e,
+      args: {
+        runnerId: 'claude-cli' | 'copilot-cli';
+        tabId: string;
+        groupId: string;
+        prompt: string;
+        cwd?: string;
+        complexity?: 'simple' | 'complex' | 'crazy';
+        complexitySource?: 'manual' | 'automatic';
+        system?: string;
+      }
+    ) => runners.runRunner(args)
+  );
+  ipcMain.handle('runner:interrupt', (_e, args: { sessionId: string }) => ({ ok: runners.interruptRunner(args.sessionId) }));
+  ipcMain.handle('runner:interrupt-all', () => {
+    runners.interruptAllRunners();
+  });
+  ipcMain.handle('runner:show-logs', (_e, args: { runnerId: string }) => {
+    const logPath = path.join(app.getPath('userData'), `runner-${args.runnerId}.log`);
+    void shell.openPath(logPath);
+    return { path: logPath };
   });
   ipcMain.handle('claw:is-dangerous', (_e, args: { text: string }) => ({ dangerous: isDangerous(args.text) }));
   ipcMain.handle('skill:claw-draft', async (_e, args: {
@@ -613,8 +768,40 @@ function wireIpc() {
   });
 }
 
+function reconcileInterruptedJobsOnLaunch() {
+  const state = getState();
+  const jobs = state.clawJobs ?? [];
+  const now = Date.now();
+  let changed = false;
+  for (const job of jobs) {
+    if (job.state !== 'running' && job.state !== 'waiting-input') continue;
+    job.state = 'interrupted';
+    job.endedAt = job.endedAt ?? now;
+    job.summary = job.summary?.trim() ? job.summary : LOST_SESSION_SUMMARY;
+    const alreadyLogged = job.events.some(
+      (event) =>
+        event.kind === 'log' &&
+        event.level === 'warn' &&
+        event.text === LOST_SESSION_SUMMARY
+    );
+    if (!alreadyLogged) {
+      job.events.push({
+        at: now,
+        kind: 'log',
+        level: 'warn',
+        text: LOST_SESSION_SUMMARY
+      });
+    }
+    changed = true;
+  }
+  if (changed) {
+    setState(state);
+  }
+}
+
 app.whenReady().then(() => {
   const load = initStore();
+  reconcileInterruptedJobsOnLaunch();
   ensureDefaultSkills();
   createMainWindow();
   createTray();

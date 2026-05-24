@@ -59,9 +59,14 @@ export function useGlobalHotkeys() {
         st.setClawPanelOpen(!st.clawPanelOpen);
         return;
       }
+      if (e.key === 'F12' || (mod(e) && e.shiftKey && e.key.toLowerCase() === 'i')) {
+        e.preventDefault();
+        void window.braindump.openDevTools();
+        return;
+      }
       if (mod(e) && e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        const gid = st.focusedGroupId || st.lockedTargetGroupId || st.hoverTargetGroupId;
+        const gid = st.focusedGroupId;
         if (gid) {
           const tab = st.tabs.find((t) => t.groups.some((g) => g.id === gid));
           if (tab) st.setClawDraftSession({ tabId: tab.id, groupId: gid });
@@ -144,10 +149,6 @@ export function useGlobalHotkeys() {
         }
         if (st.historyForGroupId) {
           st.setHistoryForGroup(null);
-          return;
-        }
-        if (st.lockedTargetGroupId) {
-          st.setLockedTarget(null);
           return;
         }
       }

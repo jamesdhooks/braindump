@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useStore, applyThemeToDom } from './store';
+import { useStore, applyThemeToDom, applyAccentColorToDom } from './store';
+import logoUrl from '../assets/logo.png';
 import { DailyReport } from './components/DailyReport';
 import { PulseDrawer } from './components/Pulse';
 import { ClawBridge } from './claw/ClawBridge';
+import { RunnerBridge } from './runners/RunnerBridge';
 import { JobPanel } from './claw/JobPanel';
 import { SkillsEditor } from './claw/SkillsEditor';
 import { ClawDraftDialog } from './claw/ClawDraftDialog';
@@ -12,6 +14,7 @@ import { Composer } from './components/Composer';
 import { NoteGroup } from './components/NoteGroup';
 import { PinnedRail } from './components/PinnedRail';
 import { Archive } from './components/Archive';
+import { DoneFooter } from './components/DoneFooter';
 import { StatusBar } from './components/StatusBar';
 import { SearchOverlay } from './components/SearchOverlay';
 import { SettingsDrawer } from './components/Settings';
@@ -19,8 +22,10 @@ import { RambleDialog } from './components/RambleDialog';
 import { BrainstormPanel } from './components/BrainstormPanel';
 import { FormatHistory } from './components/FormatHistory';
 import { Toast } from './components/Toast';
+import { SkillsWorkspace } from './components/SkillsWorkspace';
 import { useGlobalHotkeys } from './hooks/useHotkeys';
 import { useAttachmentShortcuts } from './hooks/useAttachmentShortcuts';
+import { getGroupDisplayBucket } from './lib/groupPriority';
 
 export default function App() {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -28,6 +33,7 @@ export default function App() {
   const tabs = useStore((s) => s.tabs);
   const activeTabId = useStore((s) => s.activeTabId);
   const activeTab = tabs.find((t) => t.id === activeTabId);
+  const workspaceView = useStore((s) => s.workspaceView);
   const ui = useStore((s) => s.ui);
   const rambleOpen = useStore((s) => s.rambleOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
@@ -51,6 +57,7 @@ export default function App() {
         useStore.getState().hydrate(s);
       });
       applyThemeToDom(state.ui.theme);
+      applyAccentColorToDom(state.ui.accentColor || '#7c8cff');
       document.documentElement.setAttribute('data-motion', state.ui.motion ?? 'calm');
     })();
     return () => {
@@ -59,10 +66,14 @@ export default function App() {
   }, []);
 
   const theme = useStore((s) => s.ui.theme);
+  const accentColor = useStore((s) => s.ui.accentColor);
   const motion = useStore((s) => s.ui.motion);
   useEffect(() => {
     document.documentElement.setAttribute('data-motion', motion);
   }, [motion]);
+  useEffect(() => {
+    applyAccentColorToDom(accentColor || '#7c8cff');
+  }, [accentColor]);
   useEffect(() => {
     if (theme !== 'system') return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -152,27 +163,39 @@ export default function App() {
   }
 
   const focus = ui.focus;
-  const pinned = activeTab?.groups.filter((g) => g.pinned) ?? [];
+  const pinned = activeTab?.groups.filter((g) => g.pinned && (!focus || !g.completedAt)) ?? [];
   const regular = activeTab?.groups.filter((g) => !g.pinned) ?? [];
+  const lastPrioritySortAt = activeTab?.lastPrioritySortAt;
+  const incomplete = regular.filter(
+    (g) => getGroupDisplayBucket(g, lastPrioritySortAt) === 'main' && (!focus || !g.completedAt)
+  );
+  const completed = regular.filter((g) => getGroupDisplayBucket(g, lastPrioritySortAt) === 'completed');
+  const qaPassed = regular.filter((g) => getGroupDisplayBucket(g, lastPrioritySortAt) === 'qa');
+  const doneCount = completed.length + qaPassed.length;
 
   return (
-    <div className={`h-full w-full flex flex-col bg-surface-0 text-fg-0 select-none overflow-hidden ${isMaximized ? '' : 'rounded-xl'}`}>
-      <TitleBar isMaximized={isMaximized} />
-
-      {!focus && <TabBar />}
+    <div className="h-full w-full flex flex-col bg-surface-0 text-fg-0 select-none overflow-hidden">
+      <TitleBar isMaximized={isMaximized} showTabs={!focus} />
 
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 flex flex-col min-w-0">
-          <Composer />
-          <div className="flex-1 overflow-y-auto px-8 py-6 space-y-3">
-            {pinned.length > 0 && activeTab && <PinnedRail tabId={activeTab.id} groups={pinned} />}
-            {regular.length === 0 && pinned.length === 0 && <EmptyState />}
-            {activeTab &&
-              regular.map((g) => (
-                <NoteGroup key={g.id} tabId={activeTab.id} group={g} />
-              ))}
-          </div>
-          {!focus && activeTab && <Archive />}
+          {workspaceView === 'skills' ? (
+            <SkillsWorkspace />
+          ) : (
+            <>
+              <Composer />
+              <div className="flex-1 overflow-y-auto px-8 py-6 space-y-3">
+                {pinned.length > 0 && activeTab && <PinnedRail tabId={activeTab.id} groups={pinned} />}
+                {incomplete.length === 0 && doneCount === 0 && pinned.length === 0 && <EmptyState />}
+                {activeTab &&
+                  incomplete.map((g) => (
+                    <NoteGroup key={g.id} tabId={activeTab.id} group={g} />
+                  ))}
+              </div>
+              {!focus && activeTab && doneCount > 0 && <DoneFooter tabId={activeTab.id} completed={completed} qaPassed={qaPassed} />}
+              {!focus && activeTab && <Archive tabId={activeTab.id} />}
+            </>
+          )}
         </div>
         {ui.brainstormOpen && <BrainstormPanel />}
       </div>
@@ -186,6 +209,7 @@ export default function App() {
       {dailyReportOpen && <DailyReport />}
       <PulseDrawer />
       <ClawBridge />
+      <RunnerBridge />
       <JobPanel />
       <SkillsEditor />
       <ClawDraftRenderer />
@@ -194,12 +218,22 @@ export default function App() {
   );
 }
 
-function TitleBar({ isMaximized }: { isMaximized: boolean }) {
+function TitleBar({ isMaximized, showTabs }: { isMaximized: boolean; showTabs: boolean }) {
   return (
-    <div className="drag-region h-9 flex items-center px-3 shrink-0">
-      <span className="no-drag text-[10.5px] uppercase tracking-[0.22em] text-fg-3 select-none pl-1">
-        Braindump
-      </span>
+    <div className="drag-region h-11 flex items-center gap-3 px-3 shrink-0 border-b border-hairline bg-surface-1/95 backdrop-blur">
+      <div className="no-drag flex items-center gap-1.5 pl-1 select-none">
+        <img src={logoUrl} alt="Braindump" className="w-4 h-4 object-contain" />
+        <span className="text-[10.5px] uppercase tracking-[0.22em] text-fg-3">
+          Braindump
+        </span>
+      </div>
+      {showTabs ? (
+        <div className="flex-1 min-w-0">
+          <TabBar />
+        </div>
+      ) : (
+        <div className="flex-1" />
+      )}
       <div className="no-drag ml-auto flex items-center">
         <button
           onClick={() => window.braindump.minimizeWindow()}
@@ -244,23 +278,20 @@ function ClawDraftRenderer() {
   const target = useStore((s) => s.clawDraftFor);
   const clear = useStore((s) => s.setClawDraftSession);
   if (!target) return null;
-  return <ClawDraftDialog tabId={target.tabId} groupId={target.groupId} onClose={() => clear(null)} />;
+  return <ClawDraftDialog tabId={target.tabId} groupId={target.groupId} complexity={target.complexity} onClose={() => clear(null)} />;
 }
 
 function EmptyState() {
   return (
-    <div className="pt-10 flex flex-col items-center text-center gap-3 text-fg-2 fade-new">
-      <svg width="140" height="100" viewBox="0 0 140 100" fill="none" className="text-fg-3 opacity-60">
-        <path d="M20 70 C 35 40, 70 35, 85 60 C 95 80, 125 70, 125 60" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />
-        <circle cx="30" cy="72" r="3" fill="currentColor" />
-        <circle cx="60" cy="42" r="3" fill="currentColor" />
-        <circle cx="92" cy="60" r="3" fill="currentColor" />
-        <circle cx="124" cy="58" r="3" fill="currentColor" />
-      </svg>
-      <div className="display text-[26px] text-fg-1">A clean slate.</div>
-      <div className="text-[13px] text-fg-2 max-w-sm">
-        Start dumping thoughts. <span className="mono text-fg-1">Ctrl+Enter</span> commits a group ·{' '}
-        <span className="mono text-fg-1">Ctrl+Shift+R</span> to ramble · <span className="mono text-fg-1">Ctrl+Shift+B</span> to brainstorm.
+    <div className="relative overflow-hidden rounded-[28px] border border-hairline bg-surface-1/80 px-8 py-14 flex flex-col items-center text-center gap-4 text-fg-2 fade-new shadow-[0_32px_120px_-60px_var(--accent-glow)]">
+      <div className="absolute inset-x-10 top-6 h-28 rounded-full bg-accent-500/12 blur-3xl" aria-hidden="true" />
+      <div className="relative flex h-28 w-28 items-center justify-center rounded-[30px] border border-accent-500/20 bg-surface-0/75 shadow-[0_24px_60px_-30px_var(--accent-glow)]">
+        <img src={logoUrl} alt="Braindump" className="h-20 w-20 object-contain drop-shadow-[0_10px_28px_rgba(0,0,0,0.32)]" />
+      </div>
+      <div className="relative display text-[30px] text-fg-0">Mind clear. Get Dumpin'</div>
+      <div className="relative text-[13px] text-fg-2 max-w-md leading-6">
+        Start a fresh brain dump and let the pile build from there. <span className="mono text-fg-1">Ctrl+Enter</span> launches a dump,
+        <span className="mono text-fg-1"> Ctrl+Shift+R</span> opens Ramble, and <span className="mono text-fg-1">Ctrl+Shift+B</span> opens Brainstorm.
       </div>
     </div>
   );

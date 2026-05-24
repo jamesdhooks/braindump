@@ -7,6 +7,7 @@ type Skill = { name: string; path: string; content: string; id: string; scope: s
 export function SkillsEditor() {
   const open = useStore((s) => s.clawSkillsEditorOpen);
   const setOpen = useStore((s) => s.setClawSkillsEditorOpen);
+  const showToast = useStore((s) => s.showToast);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -33,6 +34,7 @@ export function SkillsEditor() {
     const list = await window.braindump.claw.skills.write({ name: selected, content: draft });
     setSkills(list);
     setDirty(false);
+    showToast({ message: `Saved skill ${selected}`, kind: 'success' });
   }
 
   async function remove(name: string) {

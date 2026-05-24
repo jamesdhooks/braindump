@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Mic, MicOff, Sparkles, Loader2, Check } from 'lucide-react';
+import { X, Mic, MicOff, Sparkles, Loader2, Check, RotateCcw } from 'lucide-react';
 import { useStore } from '../store';
 import { nanoid } from 'nanoid';
 
@@ -26,6 +26,7 @@ export function RambleDialog() {
   const activeTabId = useStore((s) => s.activeTabId);
 
   const [text, setText] = useState('');
+  const [submittedText, setSubmittedText] = useState('');
   const [targetTabId, setTargetTabId] = useState(activeTabId);
   const [listening, setListening] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -70,13 +71,14 @@ export function RambleDialog() {
     setLoading(true);
     setStreamLines([]);
     setDone(false);
+    const monologue = text;
     const tabs = useStore.getState().tabs;
     const projectContext = tabs.find((t) => t.id === targetTabId)?.projectContext;
     try {
-      const res = await window.braindump.skill.ramble({ monologue: text, projectContext });
+      const res = await window.braindump.skill.ramble({ monologue, projectContext });
       const lines = res.ok && res.value?.lines?.length
         ? res.value.lines
-        : text.split('\n').map((l) => l.trim()).filter(Boolean);
+        : monologue.split('\n').map((l) => l.trim()).filter(Boolean);
       if (lines.length) {
         const st = useStore.getState();
         const groupId = st.addGroupLines(targetTabId, lines, false, 'ramble');
@@ -87,17 +89,26 @@ export function RambleDialog() {
             id: nanoid(8),
             at: Date.now(),
             source: 'user',
-            lines: [text],
+            lines: [monologue],
             diffSummary: 'Original ramble monologue'
           });
           st.persist();
         }
         setStreamLines(lines);
+        setSubmittedText(monologue);
         setDone(true);
+        // NOTE: text is intentionally preserved so the user can review/edit and re-submit.
       }
     } finally {
       setLoading(false);
     }
+  }
+
+  function reset() {
+    setText('');
+    setStreamLines([]);
+    setSubmittedText('');
+    setDone(false);
   }
 
   return (
@@ -157,13 +168,29 @@ export function RambleDialog() {
           </div>
 
           {streamLines.length > 0 && (
-            <div className="bg-ink-850 border border-accent-500/40 rounded p-3 space-y-0.5">
-              <div className="text-[11px] uppercase tracking-wider text-accent-400 mb-1.5">Preview</div>
-              {streamLines.map((l, i) => (
-                <div key={i} className="text-[13px] text-ink-100 fade-new">
-                  {l}
-                </div>
-              ))}
+            <div className="bg-ink-850 border border-accent-500/40 rounded p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] uppercase tracking-wider text-accent-400">Added to board — preview</div>
+                <button
+                  onClick={reset}
+                  className="inline-flex items-center gap-1 text-[11px] text-ink-300 hover:text-ink-100"
+                >
+                  <RotateCcw size={11} /> Add another
+                </button>
+              </div>
+              {submittedText && (
+                <details className="text-[11px] text-ink-400">
+                  <summary className="cursor-pointer hover:text-ink-200">Original monologue</summary>
+                  <div className="mt-1 whitespace-pre-wrap font-mono text-ink-300">{submittedText}</div>
+                </details>
+              )}
+              <div className="space-y-0.5">
+                {streamLines.map((l, i) => (
+                  <div key={i} className="text-[13px] text-ink-100 fade-new">
+                    {l}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

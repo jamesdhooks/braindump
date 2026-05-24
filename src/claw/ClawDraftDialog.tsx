@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { X, Sparkles, Send } from 'lucide-react';
 import { useStore } from '../store';
-import type { ClawDraft, ClawJob } from '../types';
+import type { ClawDraft, ClawJob, TaskComplexity } from '../types';
+import { REPORT_SYSTEM_INSTRUCTION } from './parseJobReport';
 
 type Props = {
   tabId: string;
   groupId: string;
+  complexity?: TaskComplexity;
   onClose: () => void;
 };
 
@@ -13,7 +15,7 @@ function emptyDraft(): ClawDraft {
   return { goal: '', constraints: [], acceptance_criteria: [], artifacts_to_produce: [], safety_notes: [] };
 }
 
-export function ClawDraftDialog({ tabId, groupId, onClose }: Props) {
+export function ClawDraftDialog({ tabId, groupId, complexity, onClose }: Props) {
   const tab = useStore((s) => s.tabs.find((t) => t.id === tabId));
   const group = tab?.groups.find((g) => g.id === groupId);
   const claw = useStore((s) => s.claw);
@@ -67,17 +69,39 @@ export function ClawDraftDialog({ tabId, groupId, onClose }: Props) {
   async function submit() {
     if (!group) return;
     const backend = claw?.defaultBackend ?? 'claude-code';
+    const system = [
+      'You are an autonomous coding assistant working on a real codebase.',
+      'Tech stack: Electron + React + TypeScript + Vite + Tailwind CSS.',
+      'Renderer code is in src/, main process in electron/, shared packages in packages/.',
+      'Implement the requested changes by directly reading and editing the relevant files.',
+      'Do NOT ask clarifying questions — explore the codebase with your tools, make the best decision, and proceed.',
+      complexity ? `Requested complexity: ${complexity}.` : null,
+      tab?.name ? `Project: ${tab.name}` : null,
+      tab?.projectPath ? `Working directory: ${tab.projectPath}` : null,
+      tab?.projectContext ? `Context: ${tab.projectContext}` : null,
+      REPORT_SYSTEM_INSTRUCTION,
+    ]
+      .filter(Boolean)
+      .join('\n');
     const { sessionId } = await window.braindump.claw.startSession({
+      tabId,
+      groupId,
       backend,
-      cwd: (window as unknown as { process?: { cwd?: () => string } }).process?.cwd?.() ?? '',
+      cwd: tab?.projectPath ?? '',
       skills: brokerState.skills,
-      system: [
-        `Project: ${tab?.name ?? ''}`,
-        tab?.projectContext ? `Context: ${tab.projectContext}` : null
-      ]
-        .filter(Boolean)
-        .join('\n')
+      system
     });
+    const payload = [
+      complexity ? `TASK_COMPLEXITY: ${complexity}` : '',
+      `GOAL: ${draft.goal}`,
+      draft.constraints.length ? `CONSTRAINTS:\n- ${draft.constraints.join('\n- ')}` : '',
+      draft.acceptance_criteria.length ? `ACCEPTANCE:\n- ${draft.acceptance_criteria.join('\n- ')}` : '',
+      draft.artifacts_to_produce.length ? `ARTIFACTS:\n- ${draft.artifacts_to_produce.join('\n- ')}` : '',
+      draft.safety_notes.length ? `SAFETY:\n- ${draft.safety_notes.join('\n- ')}` : '',
+      `SOURCE GROUP:\n${group.lines.join('\n')}`
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     const job: ClawJob = {
       sessionId,
       tabId,
@@ -89,20 +113,20 @@ export function ClawDraftDialog({ tabId, groupId, onClose }: Props) {
       skills: brokerState.skills,
       events: [],
       artifacts: [],
-      pendingPrompts: []
+      pendingPrompts: [],
+      invocation: {
+        executionType: 'claw',
+        binary: backend,
+        args: [],
+        complexity: complexity ?? 'complex',
+        complexitySource: complexity ? 'manual' : 'automatic',
+        prompt: payload,
+        system: system || undefined,
+        cwd: tab?.projectPath || undefined
+      }
     };
     upsertJob(job);
 
-    const payload = [
-      `GOAL: ${draft.goal}`,
-      draft.constraints.length ? `CONSTRAINTS:\n- ${draft.constraints.join('\n- ')}` : '',
-      draft.acceptance_criteria.length ? `ACCEPTANCE:\n- ${draft.acceptance_criteria.join('\n- ')}` : '',
-      draft.artifacts_to_produce.length ? `ARTIFACTS:\n- ${draft.artifacts_to_produce.join('\n- ')}` : '',
-      draft.safety_notes.length ? `SAFETY:\n- ${draft.safety_notes.join('\n- ')}` : '',
-      `SOURCE GROUP:\n${group.lines.join('\n')}`
-    ]
-      .filter(Boolean)
-      .join('\n\n');
     await window.braindump.claw.message(sessionId, payload);
 
     setFilter(groupId);
@@ -165,6 +189,7 @@ export function ClawDraftDialog({ tabId, groupId, onClose }: Props) {
         <div className="flex items-center justify-between px-5 py-3 border-t border-hairline bg-surface-1">
           <div className="text-[11px] text-fg-3">
             Backend: {claw?.defaultBackend ?? 'claude-code'} · Broker: {brokerState.status}
+            {complexity ? ` · Complexity: ${complexity}` : ''}
           </div>
           <button
             disabled={brokerState.status !== 'connected' || drafting || !draft.goal.trim()}

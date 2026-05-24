@@ -94,6 +94,7 @@ export async function runSkill<TIn, TOut>(opts: RunSkillOpts<TIn, TOut>): Promis
   const state = getState();
   const provider = providerForFeature(state, opts.feature);
   if (!provider) {
+    logLine({ ts: Date.now(), feature: opts.feature, ok: false, error: 'No provider configured for this feature', latencyMs: 0 });
     return {
       ok: false,
       value: null,
@@ -172,6 +173,7 @@ export async function runSkill<TIn, TOut>(opts: RunSkillOpts<TIn, TOut>): Promis
 
   const latencyMs = Date.now() - t0;
   recordUsage(opts.feature, res.inputTokens, res.outputTokens);
+  const userMsg = [...messages].reverse().find((m: LLMMessage) => m.role === 'user')?.content ?? '';
   logLine({
     ts: Date.now(),
     feature: opts.feature,
@@ -181,7 +183,9 @@ export async function runSkill<TIn, TOut>(opts: RunSkillOpts<TIn, TOut>): Promis
     outputTokens: res.outputTokens,
     latencyMs,
     ok: parsed.ok,
-    error: parsed.ok ? undefined : parsed.error
+    error: parsed.ok ? undefined : parsed.error,
+    rawPreview: res.text.slice(0, 1200),
+    promptPreview: userMsg.slice(0, 400)
   });
 
   if (parsed.ok) {
@@ -193,7 +197,8 @@ export async function runSkill<TIn, TOut>(opts: RunSkillOpts<TIn, TOut>): Promis
       provider,
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
-      latencyMs
+      latencyMs,
+      messages
     };
   }
 
@@ -206,6 +211,7 @@ export async function runSkill<TIn, TOut>(opts: RunSkillOpts<TIn, TOut>): Promis
     provider,
     inputTokens: res.inputTokens,
     outputTokens: res.outputTokens,
-    latencyMs
+    latencyMs,
+    messages
   };
 }

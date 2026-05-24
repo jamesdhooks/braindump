@@ -1,15 +1,13 @@
 import { useEffect } from 'react';
-import { useStore, useEffectiveTargetGroupId } from '../store';
+import { useStore } from '../store';
 import { nanoid } from 'nanoid';
 
 async function attachImage(dataUrl: string) {
   const st = useStore.getState();
-  let targetId = st.lockedTargetGroupId ?? st.hoverTargetGroupId;
   const tabId = st.activeTabId;
   if (!tabId) return;
-  if (!targetId) {
-    targetId = st.addGroupLines(tabId, ['(image note)'], false, 'user');
-  }
+  // Always create a new group for attachments (hover/lock target removed).
+  const targetId = st.addGroupLines(tabId, ['(image note)'], false, 'user');
   const saved = await window.braindump.attachments.saveBase64(dataUrl);
   st.attachImageToGroup(tabId, targetId, {
     id: nanoid(8),
@@ -21,9 +19,6 @@ async function attachImage(dataUrl: string) {
 }
 
 export function useAttachmentShortcuts() {
-  // keep hook referenced to ensure consistent render deps
-  useEffectiveTargetGroupId();
-
   useEffect(() => {
     const onPaste = async (e: ClipboardEvent) => {
       if (!e.clipboardData) return;

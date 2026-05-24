@@ -26,7 +26,7 @@ export async function runTasks(lines: string[]) {
     input: lines,
     schema: TasksSchema,
     buildMessages: (l) => [
-      { role: 'system', content: 'Extract actionable todo items. Each task is a short imperative line prefixed with "[ ] ". Return ONLY JSON: { "tasks": string[] }.' },
+      { role: 'system', content: 'Extract actionable todo items. Only return items that are clearly actionable by the user. Each task must be a short imperative Markdown checkbox bullet exactly like "- [ ] Follow up with vendor". Output ONLY a JSON object matching the schema: { "tasks": string[] }' },
       { role: 'user', content: `Lines:\n${JSON.stringify(l)}\n\nReturn the JSON object now.` }
     ]
   });

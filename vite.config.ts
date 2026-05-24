@@ -17,6 +17,12 @@ export default defineConfig({
     electron([
       {
         entry: 'electron/main.ts',
+        onstart({ startup }) {
+          // Some shells/tools leak this flag, which makes Electron run as plain Node.
+          const env = { ...process.env };
+          delete env.ELECTRON_RUN_AS_NODE;
+          startup(['.', '--no-sandbox'], { env });
+        },
         vite: {
           build: {
             outDir: 'dist-electron',
@@ -41,7 +47,7 @@ export default defineConfig({
     renderer()
   ],
   server: {
-    port: 5173,
+    port: 9173,
     strictPort: true
   },
   build: {

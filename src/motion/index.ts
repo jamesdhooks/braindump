@@ -23,8 +23,18 @@ const TRANSITIONS: Record<MotionPreset, Transition> = {
   reduced: { type: 'tween', duration: 0 }
 };
 
+const LAYOUT_TRANSITIONS: Record<MotionPreset, Transition> = {
+  calm: { type: 'tween', ease: [0.22, 1, 0.36, 1], duration: 0.62 },
+  floaty: { type: 'spring', damping: 18, stiffness: 62, mass: 0.95 },
+  reduced: { type: 'tween', duration: 0 }
+};
+
 export function transitionFor(preset: MotionPreset): Transition {
   return TRANSITIONS[preset];
+}
+
+export function layoutTransitionFor(preset: MotionPreset): Transition {
+  return LAYOUT_TRANSITIONS[preset];
 }
 
 export const cardEnter: Record<MotionPreset, Variants> = {
