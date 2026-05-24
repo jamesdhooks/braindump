@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { NoteGroupSchema, type NoteGroup, type Tab } from './schema';
+import {
+  NoteGroupSchema,
+  TaskCardSchema,
+  type NoteGroup,
+  type Tab,
+  type TaskCard,
+  type TaskStatus,
+  type TaskSync
+} from './schema';
 
 export const OpKindSchema = z.enum([
   'addTab',
@@ -17,7 +25,10 @@ export const OpKindSchema = z.enum([
   'appendGroupLines',
   'setAutoFormatOptOut',
   'setGroupTags',
-  'deleteGroup'
+  'deleteGroup',
+  'upsertTaskCard',
+  'setTaskStatus',
+  'setTaskSyncState'
 ]);
 export type OpKind = z.infer<typeof OpKindSchema>;
 
@@ -32,9 +43,20 @@ export const OpSchema = z.object({
 });
 export type Op = z.infer<typeof OpSchema>;
 
+export type TaskOutboxEvent = {
+  id: string;
+  kind: 'task.requested' | 'task.status_changed';
+  taskId: string;
+  status: TaskStatus;
+  at: number;
+  note?: string;
+};
+
 export type OpState = {
   tabs: Tab[];
   archive: { group: NoteGroup; completedAt: number; tabId: string }[];
+  tasks?: TaskCard[];
+  taskOutbox?: TaskOutboxEvent[];
 };
 
 // Compare two ops for LWW: higher lamport wins; tie broken by clientId string.
@@ -51,10 +73,33 @@ function findGroup(state: OpState, tabId: string, groupId: string): NoteGroup | 
   return findTab(state, tabId)?.groups.find((g) => g.id === groupId);
 }
 
+function findTask(state: OpState, taskId: string): TaskCard | undefined {
+  return state.tasks?.find((t) => t.id === taskId);
+}
+
+function makeTaskOutboxEvent(
+  op: Op,
+  kind: TaskOutboxEvent['kind'],
+  taskId: string,
+  status: TaskStatus,
+  note?: string
+): TaskOutboxEvent {
+  return {
+    id: `${op.id}:${kind}`,
+    kind,
+    taskId,
+    status,
+    at: op.appliedAt,
+    ...(note ? { note } : {})
+  };
+}
+
 export function applyOp(state: OpState, op: Op): OpState {
   const next: OpState = {
     tabs: state.tabs.map((t) => ({ ...t, groups: t.groups.map((g) => ({ ...g })) })),
-    archive: state.archive.map((a) => ({ ...a, group: { ...a.group } }))
+    archive: state.archive.map((a) => ({ ...a, group: { ...a.group } })),
+    tasks: (state.tasks ?? []).map((t) => ({ ...t, sync: { ...t.sync }, tags: [...t.tags], externalLinks: [...t.externalLinks] })),
+    taskOutbox: (state.taskOutbox ?? []).map((event) => ({ ...event }))
   };
   const p = op.payload as Record<string, unknown>;
   switch (op.kind) {
@@ -168,6 +213,45 @@ export function applyOp(state: OpState, op: Op): OpState {
     case 'deleteGroup': {
       const t = findTab(next, String(p.tabId));
       if (t) t.groups = t.groups.filter((g) => g.id !== String(p.groupId));
+      break;
+    }
+    case 'upsertTaskCard': {
+      const parsed = TaskCardSchema.safeParse(p.task);
+      if (!parsed.success) break;
+      const existing = findTask(next, parsed.data.id);
+      const queuedTask: TaskCard = {
+        ...parsed.data,
+        updatedAt: op.appliedAt,
+        sync: { ...parsed.data.sync, state: parsed.data.sync.state === 'local' ? 'queued' : parsed.data.sync.state }
+      };
+      if (existing) {
+        Object.assign(existing, queuedTask);
+      } else {
+        next.tasks!.push(queuedTask);
+      }
+      next.taskOutbox!.push(makeTaskOutboxEvent(op, 'task.requested', queuedTask.id, queuedTask.status));
+      break;
+    }
+    case 'setTaskStatus': {
+      const task = findTask(next, String(p.taskId));
+      const parsedStatus = TaskCardSchema.shape.status.safeParse(p.status);
+      if (!task || !parsedStatus.success) break;
+      task.status = parsedStatus.data;
+      task.updatedAt = op.appliedAt;
+      task.sync = { ...task.sync, state: 'queued' };
+      next.taskOutbox!.push(
+        makeTaskOutboxEvent(op, 'task.status_changed', task.id, task.status, typeof p.note === 'string' ? p.note : undefined)
+      );
+      break;
+    }
+    case 'setTaskSyncState': {
+      const task = findTask(next, String(p.taskId));
+      if (!task) break;
+      const syncPatch = (p.sync ?? {}) as Partial<TaskSync>;
+      task.sync = { ...task.sync, ...syncPatch };
+      if (typeof syncPatch.runnerTaskId === 'string') task.runnerTaskId = syncPatch.runnerTaskId;
+      if (typeof syncPatch.monitorTaskId === 'string') task.monitorTaskId = syncPatch.monitorTaskId;
+      task.updatedAt = op.appliedAt;
       break;
     }
   }

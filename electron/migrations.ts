@@ -1,6 +1,6 @@
 import type { PersistedStore } from '../src/types';
 
-export const CURRENT_VERSION = 5;
+export const CURRENT_VERSION = 6;
 
 type Migration = (s: Record<string, unknown>) => Record<string, unknown>;
 
@@ -83,6 +83,30 @@ const MIGRATIONS: Record<number, Migration> = {
       s.skills = [];
     }
     return { ...s, version: 5 };
+  },
+  // 5 -> 6: add local task cards, task outbox, and Agent Runner integration defaults
+  5: (s) => {
+    if (!Array.isArray(s.tasks)) {
+      s.tasks = [];
+    }
+    if (!Array.isArray(s.taskOutbox)) {
+      s.taskOutbox = [];
+    }
+
+    const integrations = (s.integrations as Record<string, unknown> | undefined) ?? {};
+    const agentRunner = (integrations.agentRunner as Record<string, unknown> | undefined) ?? {};
+    integrations.agentRunner = {
+      enabled: typeof agentRunner.enabled === 'boolean' ? agentRunner.enabled : false,
+      endpoint: typeof agentRunner.endpoint === 'string' ? agentRunner.endpoint : '',
+      tokenRef: typeof agentRunner.tokenRef === 'string' ? agentRunner.tokenRef : undefined,
+      defaultProjectId: typeof agentRunner.defaultProjectId === 'string' ? agentRunner.defaultProjectId : undefined,
+      sendRequiresReview:
+        typeof agentRunner.sendRequiresReview === 'boolean' ? agentRunner.sendRequiresReview : true,
+      syncMonitorSnapshots:
+        typeof agentRunner.syncMonitorSnapshots === 'boolean' ? agentRunner.syncMonitorSnapshots : false
+    };
+    s.integrations = integrations;
+    return { ...s, version: 6 };
   }
 };
 

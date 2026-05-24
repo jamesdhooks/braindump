@@ -295,6 +295,18 @@ export const useStore = create<StoreState>()(
     activeTabId: 'inbox',
     archive: [],
     brainstorms: [],
+    tasks: [],
+    taskOutbox: [],
+    integrations: {
+      agentRunner: {
+        enabled: false,
+        endpoint: '',
+        tokenRef: undefined,
+        defaultProjectId: undefined,
+        sendRequiresReview: true,
+        syncMonitorSnapshots: false
+      }
+    },
     providers: [],
     activeProviderId: 'openai',
     featureProviderOverrides: {},
@@ -364,6 +376,10 @@ export const useStore = create<StoreState>()(
       set((s) => {
         Object.assign(s, p);
         s.skills = Array.isArray(p.skills) ? p.skills : [];
+        s.tasks = Array.isArray(p.tasks) ? p.tasks : [];
+        s.taskOutbox = Array.isArray(p.taskOutbox) ? p.taskOutbox : [];
+        s.integrations = p.integrations ?? s.integrations;
+        s.integrations.agentRunner = p.integrations?.agentRunner ?? s.integrations.agentRunner;
         s.runners = p.runners ?? s.runners;
         if (!/^#[0-9a-fA-F]{6}$/.test(s.ui?.accentColor ?? '')) {
           s.ui.accentColor = DEFAULT_ACCENT_COLOR;
@@ -382,6 +398,9 @@ export const useStore = create<StoreState>()(
           activeTabId: s.activeTabId,
           archive: s.archive,
           brainstorms: s.brainstorms,
+          tasks: s.tasks,
+          taskOutbox: s.taskOutbox,
+          integrations: s.integrations,
           providers: s.providers,
           activeProviderId: s.activeProviderId,
           featureProviderOverrides: s.featureProviderOverrides,

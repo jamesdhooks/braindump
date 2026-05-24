@@ -24,6 +24,56 @@ const LineSubStateSchema = z.object({
   completed: z.boolean().optional()
 });
 
+export const TaskStatusSchema = z.enum([
+  'todo',
+  'in_progress',
+  'qa_required',
+  'user_action_required',
+  'blocked',
+  'done',
+  'archived'
+]);
+
+export const TaskExternalLinkSchema = z.object({
+  label: z.string(),
+  url: z.string(),
+  kind: z.enum(['braindump', 'runner', 'monitor', 'preview', 'pr', 'log', 'other']).default('other')
+});
+
+export const TaskSyncSchema = z.object({
+  state: z.enum(['local', 'queued', 'syncing', 'synced', 'error']).default('local'),
+  runnerTaskId: z.string().optional(),
+  monitorTaskId: z.string().optional(),
+  monitorUrl: z.string().optional(),
+  lastSyncedAt: z.number().optional(),
+  lastError: z.string().optional(),
+  outboxEventIds: z.array(z.string()).default([])
+});
+
+export const TaskSourceSchema = z.object({
+  kind: z.enum(['note-group', 'manual', 'import']),
+  tabId: z.string().optional(),
+  groupId: z.string().optional()
+});
+
+export const TaskCardSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  status: TaskStatusSchema,
+  priority: z.number(),
+  assignee: z.string().optional(),
+  source: TaskSourceSchema.optional(),
+  tags: z.array(z.string()).default([]),
+  externalLinks: z.array(TaskExternalLinkSchema).default([]),
+  runnerTaskId: z.string().optional(),
+  monitorTaskId: z.string().optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  sync: TaskSyncSchema.default({ state: 'local', outboxEventIds: [] })
+});
+
 export const NoteGroupSchema = z.object({
   id: z.string(),
   lines: z.array(NoteLineSchema),
@@ -55,6 +105,11 @@ export const TabSchema = z.object({
   aliases: z.array(z.string()).optional()
 });
 
+export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+export type TaskExternalLink = z.infer<typeof TaskExternalLinkSchema>;
+export type TaskSync = z.infer<typeof TaskSyncSchema>;
+export type TaskSource = z.infer<typeof TaskSourceSchema>;
+export type TaskCard = z.infer<typeof TaskCardSchema>;
 export type NoteGroup = z.infer<typeof NoteGroupSchema>;
 export type Tab = z.infer<typeof TabSchema>;
 export type Attachment = z.infer<typeof AttachmentSchema>;

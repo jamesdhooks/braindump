@@ -1,3 +1,5 @@
+import type { TaskCard, TaskOutboxEvent } from '../packages/core';
+
 export type LLMProviderId = 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'custom';
 
 export type LLMProviderConfig = {
@@ -313,12 +315,28 @@ export type UsageDay = {
   outputTokens: number;
 };
 
+export type AgentRunnerIntegrationConfig = {
+  enabled: boolean;
+  endpoint: string;
+  tokenRef?: string;
+  defaultProjectId?: string;
+  sendRequiresReview: boolean;
+  syncMonitorSnapshots: boolean;
+};
+
+export type IntegrationsConfig = {
+  agentRunner: AgentRunnerIntegrationConfig;
+};
+
 export type PersistedStore = {
   version: number;
   tabs: Tab[];
   activeTabId: string;
   archive: ArchiveEntry[];
   brainstorms: BrainstormSession[];
+  tasks: TaskCard[];
+  taskOutbox: TaskOutboxEvent[];
+  integrations: IntegrationsConfig;
   providers: LLMProviderConfig[];
   activeProviderId: LLMProviderId;
   featureProviderOverrides: Partial<Record<'autoFormat' | 'ramble' | 'brainstorm' | 'embeddings' | 'vision' | 'tag', LLMProviderId>>;

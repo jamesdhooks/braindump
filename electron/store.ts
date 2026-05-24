@@ -25,6 +25,18 @@ export const DEFAULT_STATE: PersistedStore = {
   activeTabId: 'inbox',
   archive: [],
   brainstorms: [],
+  tasks: [],
+  taskOutbox: [],
+  integrations: {
+    agentRunner: {
+      enabled: false,
+      endpoint: '',
+      tokenRef: undefined,
+      defaultProjectId: undefined,
+      sendRequiresReview: true,
+      syncMonitorSnapshots: false
+    }
+  },
   providers: [
     {
       id: 'openai',
