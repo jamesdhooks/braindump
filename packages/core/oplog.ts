@@ -27,6 +27,7 @@ export const OpKindSchema = z.enum([
   'setGroupTags',
   'deleteGroup',
   'upsertTaskCard',
+  'requestTaskSend',
   'setTaskStatus',
   'setTaskSyncState'
 ]);
@@ -219,17 +220,29 @@ export function applyOp(state: OpState, op: Op): OpState {
       const parsed = TaskCardSchema.safeParse(p.task);
       if (!parsed.success) break;
       const existing = findTask(next, parsed.data.id);
-      const queuedTask: TaskCard = {
+      const localTask: TaskCard = {
         ...parsed.data,
         updatedAt: op.appliedAt,
-        sync: { ...parsed.data.sync, state: parsed.data.sync.state === 'local' ? 'queued' : parsed.data.sync.state }
+        sync: { ...parsed.data.sync, state: parsed.data.sync.state }
       };
       if (existing) {
-        Object.assign(existing, queuedTask);
+        Object.assign(existing, localTask);
       } else {
-        next.tasks!.push(queuedTask);
+        next.tasks!.push(localTask);
       }
-      next.taskOutbox!.push(makeTaskOutboxEvent(op, 'task.requested', queuedTask.id, queuedTask.status));
+      break;
+    }
+    case 'requestTaskSend': {
+      const task = findTask(next, String(p.taskId));
+      if (!task || p.reviewConfirmed !== true) break;
+      const event = makeTaskOutboxEvent(op, 'task.requested', task.id, task.status);
+      task.sync = {
+        ...task.sync,
+        state: 'queued',
+        outboxEventIds: Array.from(new Set([...(task.sync.outboxEventIds ?? []), event.id]))
+      };
+      task.updatedAt = op.appliedAt;
+      next.taskOutbox!.push(event);
       break;
     }
     case 'setTaskStatus': {
